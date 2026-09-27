@@ -17,6 +17,8 @@
   import InfoButton from "./lib/components/InfoButton.svelte";
   import OptionsButton from "./lib/components/OptionsButton.svelte";
   import EquipmentButton from "./lib/components/EquipmentButton.svelte";
+  import ExpeditionButton from "./lib/components/ExpeditionButton.svelte";
+  import ExpeditionView from "./lib/components/ExpeditionView.svelte";
   import { Page } from "./lib/model/PageStore";
   import ArmorView from "./lib/components/ArmorView.svelte";
   import StrainView from "./lib/components/StrainView.svelte";
@@ -128,6 +130,7 @@
               <OptionsButton bind:files />
               <ResumeCharacterCreatorButton />
               <EquipmentButton />
+              <ExpeditionButton />
               <NotesButton />
               {#if OBR.isAvailable}
                 <NotificationsButton />
@@ -284,7 +287,7 @@
           <AttacksView />
         </div>
       </div>
-    {:else}
+    {:else if $Page === "equipment"}
       <!-- EQUIPMENT PAGE: gear, usage dice, coin -->
       <div class="w-full h-[700px] flex flex-col gap-2">
         <div class="cell flex-1 min-h-0">
@@ -298,6 +301,11 @@
             <CurrencyView />
           </div>
         </div>
+      </div>
+    {:else}
+      <!-- SHARED COMPANY EXPEDITION PAGE: room-level state, visible to everyone -->
+      <div class="w-full h-[700px]">
+        <ExpeditionView />
       </div>
     {/if}
     </div>

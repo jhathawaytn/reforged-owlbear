@@ -8,6 +8,7 @@ import { getSaveSlot, saveSaveSlot } from "./LocalStorageSaver";
 import { CurrentSaveSlot, NUM_SLOTS } from "./SaveSlotTracker";
 import type { ReforgedCharacter } from "../types";
 import { NOTIFICATION_KEY, showPopover } from "./Notifier";
+import { initExpeditionStore } from "../model/ExpeditionStore";
 
 const PLUGIN_ID = "rodeo.owlbear.reforged-sheet";
 
@@ -37,6 +38,8 @@ export async function init() {
 
     subscribeToRoomNotifications();
     subscribeToHPNudges();
+    initPartyPresence();
+    await initExpeditionStore();
 
     if (get(isGM)) {
       initGM();
@@ -85,16 +88,19 @@ export async function sendHPNudge(targetPlayerId: string, delta: number, reason:
   OBR.broadcast.sendMessage(HP_NUDGE_KEY, nudge);
 }
 
+function initPartyPresence() {
+  OBR.party.onChange((party) => {
+    PartyStore.set(party);
+  });
+  OBR.party.getPlayers().then((party) => PartyStore.set(party));
+}
+
 async function initGM() {
   GmId.set(OBR.player.id);
   TrackedPlayer.set(OBR.player.id);
 
   OBR.player.onChange((gm) => {
     GmPlayer.set(gm);
-  });
-
-  OBR.party.onChange((party) => {
-    PartyStore.set(party);
   });
 
   PartyStore.subscribe(async (party) => {
@@ -134,7 +140,6 @@ async function initGM() {
     PlayerCharacterStore.set(withDefaults(pmd[pId]?.[`slot-${slot}`]));
   });
 
-  PartyStore.set(await OBR.party.getPlayers());
 }
 
 async function initPlayer() {
