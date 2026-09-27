@@ -118,6 +118,7 @@ async function initGM() {
   PlayerMetaDataMapStore.subscribe((pmd) => {
     const slot = get(CurrentSaveSlot);
     const pId = get(TrackedPlayer);
+    if (!pId || pId === get(GmId)) return;
     PlayerCharacterStore.set(withDefaults(pmd[pId]?.[`slot-${slot}`]));
   });
 
