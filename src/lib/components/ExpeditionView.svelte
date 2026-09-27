@@ -268,70 +268,72 @@
           </div>
         </div>
 
-        <div class="mt-3">
-          <div class="flex items-center justify-between gap-2 mb-1">
-            <div>
-              <div class="font-bold text-xs">Travel Roles</div>
-              <div class="text-[10px] text-gray-500">Roles are performed while Traveling; each role accepts one character.</div>
+        {#key JSON.stringify($expedition.wilderness.assignments)}
+          <div class="mt-3">
+            <div class="flex items-center justify-between gap-2 mb-1">
+              <div>
+                <div class="font-bold text-xs">Travel Roles</div>
+                <div class="text-[10px] text-gray-500">Roles are performed while Traveling; each role accepts one character.</div>
+              </div>
+              {#if $isGM}
+                <button class="border rounded-md px-2 py-1 text-[10px]" on:click={resetAssignments}>Reset Assignments</button>
+              {/if}
             </div>
-            {#if $isGM}
-              <button class="border rounded-md px-2 py-1 text-[10px]" on:click={resetAssignments}>Reset Assignments</button>
-            {/if}
-          </div>
 
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-1">
-            {#each roleCards as card (card.role)}
-              <div class="assignment-card">
-                <div class="font-bold text-xs">{card.role}</div>
-                {#if card.assignment}
-                  <div class="flex items-center gap-1 mt-1 text-xs">
-                    <i class="material-icons text-sm">person</i>
-                    <span class="truncate">{card.member?.name ?? "Disconnected character"}</span>
-                  </div>
-                {:else}
-                  <div class="text-[10px] text-gray-400 mt-1">Unassigned</div>
-                {/if}
-              </div>
-            {/each}
-          </div>
-        </div>
-
-        <div class="mt-3">
-          <div class="flex items-center justify-between gap-2">
-            <div>
-              <div class="font-bold text-xs">Quarter Activities</div>
-              <div class="text-[10px] text-gray-500">Each character takes one Activity this Quarter.</div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-1">
+              {#each roleCards as card (card.role)}
+                <div class="assignment-card">
+                  <div class="font-bold text-xs">{card.role}</div>
+                  {#if card.assignment}
+                    <div class="flex items-center gap-1 mt-1 text-xs">
+                      <i class="material-icons text-sm">person</i>
+                      <span class="truncate">{card.member?.name ?? "Disconnected character"}</span>
+                    </div>
+                  {:else}
+                    <div class="text-[10px] text-gray-400 mt-1">Unassigned</div>
+                  {/if}
+                </div>
+              {/each}
             </div>
-            {#if haltsForActivity}
-              <div class="text-[10px] font-bold text-red-700 border border-red-300 bg-red-50 rounded px-2 py-1">
-                Company halts — no travel progress this Quarter.
-              </div>
-            {/if}
           </div>
 
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-1 mt-1">
-            {#each activityCards as card (card.activity)}
-              <div class="assignment-card min-h-[74px]">
-                <div class="font-bold text-xs">{card.activity}</div>
-                {#if card.members.length}
-                  <div class="flex flex-col gap-1 mt-1">
-                    {#each card.members as entry (entry.member.id)}
-                      <div class="flex items-center gap-1 text-xs min-w-0">
-                        <i class="material-icons text-sm">person</i>
-                        <span class="truncate">{entry.member.name}</span>
-                        {#if entry.assignment.role}
-                          <span class="role-chip">{entry.assignment.role}</span>
-                        {/if}
-                      </div>
-                    {/each}
-                  </div>
-                {:else}
-                  <div class="text-[10px] text-gray-400 mt-1">—</div>
-                {/if}
+          <div class="mt-3">
+            <div class="flex items-center justify-between gap-2">
+              <div>
+                <div class="font-bold text-xs">Quarter Activities</div>
+                <div class="text-[10px] text-gray-500">Each character takes one Activity this Quarter.</div>
               </div>
-            {/each}
+              {#if haltsForActivity}
+                <div class="text-[10px] font-bold text-red-700 border border-red-300 bg-red-50 rounded px-2 py-1">
+                  Company halts — no travel progress this Quarter.
+                </div>
+              {/if}
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-1 mt-1">
+              {#each activityCards as card (card.activity)}
+                <div class="assignment-card min-h-[74px]">
+                  <div class="font-bold text-xs">{card.activity}</div>
+                  {#if card.members.length}
+                    <div class="flex flex-col gap-1 mt-1">
+                      {#each card.members as entry (entry.member.id)}
+                        <div class="flex items-center gap-1 text-xs min-w-0">
+                          <i class="material-icons text-sm">person</i>
+                          <span class="truncate">{entry.member.name}</span>
+                          {#if entry.assignment.role}
+                            <span class="role-chip">{entry.assignment.role}</span>
+                          {/if}
+                        </div>
+                      {/each}
+                    </div>
+                  {:else}
+                    <div class="text-[10px] text-gray-400 mt-1">—</div>
+                  {/if}
+                </div>
+              {/each}
+            </div>
           </div>
-        </div>
+        {/key}
       </div>
 
       <div class="exp-cell min-h-0 overflow-y-auto">
