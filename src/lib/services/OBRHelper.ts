@@ -9,6 +9,7 @@ import { CurrentSaveSlot, NUM_SLOTS } from "./SaveSlotTracker";
 import type { ReforgedCharacter } from "../types";
 import { NOTIFICATION_KEY, showPopover } from "./Notifier";
 import { initExpeditionStore } from "../model/ExpeditionStore";
+import { initExpeditionRolls } from "./ExpeditionRolls";
 
 const PLUGIN_ID = "rodeo.owlbear.reforged-sheet";
 
@@ -39,6 +40,7 @@ export async function init() {
     subscribeToRoomNotifications();
     subscribeToHPNudges();
     initPartyPresence();
+    initExpeditionRolls();
     await initExpeditionStore();
 
     if (get(isGM)) {

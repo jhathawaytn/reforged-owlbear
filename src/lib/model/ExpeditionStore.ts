@@ -5,6 +5,7 @@ export type ExpeditionMode = "wilderness" | "exploration";
 export type TravelQuarter = "Morning" | "Day" | "Evening" | "Night";
 export type RouteMode = "Known Route" | "Unmapped Country";
 export type TravelPace = "Cautious" | "Steady" | "Forced";
+export type TravelTerrain = "Open" | "Broken" | "Difficult" | "Severe";
 
 export type WildernessActivity =
   | "Travel"
@@ -29,6 +30,7 @@ export type WildernessExpeditionState = {
   quarter: TravelQuarter;
   routeMode: RouteMode;
   pace: TravelPace;
+  terrain: TravelTerrain;
   weather: string;
   currentLocation: string;
   destination: string;
@@ -59,6 +61,7 @@ export const defaultExpeditionState = (): ExpeditionState => ({
     quarter: "Morning",
     routeMode: "Unmapped Country",
     pace: "Steady",
+    terrain: "Open",
     weather: "Not rolled",
     currentLocation: "",
     destination: "",
