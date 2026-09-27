@@ -119,17 +119,19 @@ export function slotsForZone(pc: ReforgedCharacter, zone: GearZone): number {
   return pc.gear.filter((g) => g.zone === zone).reduce((acc, g) => acc + countsTowardSlots(g), 0);
 }
 
-// Soft display caps per zone (§9.1.2) - shown as a warning, not enforced.
-export function zoneCapacity(pc: ReforgedCharacter, zone: GearZone): number {
+// Zone-specific access limits. Worn and Backpack do not have their own
+// independent slot caps in Chapter 9; they still count normally against the
+// character's total STR inventory capacity. Handy is normally 2 slots and
+// Pack Master increases it to 4.
+export function zoneCapacity(pc: ReforgedCharacter, zone: GearZone): number | undefined {
   switch (zone) {
     case "Hand":
       return 2;
     case "Handy":
-      return 2;
+      return pc.talentsOwned.some((t) => t.name === "Pack Master") ? 4 : 2;
     case "Worn":
-      return Math.floor(pc.attributes.STR / 2);
     case "Backpack":
-      return Math.max(0, inventoryCapacity(pc) - filledSlots(pc) + slotsForZone(pc, "Backpack"));
+      return undefined;
   }
 }
 
