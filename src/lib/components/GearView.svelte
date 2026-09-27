@@ -84,16 +84,26 @@
   $: overburdened = isOverburdened($pc);
   $: startingKitLocked = $pc.startingKitApplied || $pc.characterCreationFinalized;
 
-  // Soft per-zone caps (§9.1.2) - a warning only, never enforced. Backpack's
-  // "cap" is just whatever capacity remains once Hand/Handy/Worn/Fatigue &
-  // Injury/Strain are accounted for, so it can't be overfilled independently
-  // of already being Overburdened overall - shown anyway for a complete
-  // zone-by-zone picture.
+  // Hand/Handy have zone-specific access limits. Worn and Backpack are
+  // location/access categories only; their burden is governed by total STR.
   $: zoneUsage = GEAR_ZONES.map((zone) => ({
     zone,
     used: slotsForZone($pc, zone),
     cap: zoneCapacity($pc, zone),
   }));
+
+  function zoneHeaderClass(zone: GearZone): string {
+    switch (zone) {
+      case "Hand":
+        return "bg-blue-100";
+      case "Handy":
+        return "bg-amber-100";
+      case "Worn":
+        return "bg-emerald-100";
+      case "Backpack":
+        return "bg-violet-100";
+    }
+  }
 </script>
 
 <div class="flex justify-between items-center gap-2 flex-wrap">
@@ -122,16 +132,6 @@
   </div>
 </div>
 
-<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs mt-1">
-  {#each zoneUsage as z (z.zone)}
-    <span
-      class="rounded px-1 {z.used > z.cap ? 'bg-red-600 text-white' : 'bg-gray-100'}"
-      title="{z.zone} zone capacity (§9.1.2) - a soft warning only, never enforced."
-    >
-      {z.zone} {z.used}/{z.cap}
-    </span>
-  {/each}
-</div>
 
 <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs mt-1 bg-gray-100 rounded-md px-1 py-0.5">
   <span title="Fatigue & Injury zone - 1 slot each, always counts against STR, never dropped with the Backpack. Fatigue clears only on a Normal or Comfortable Rest.">
@@ -149,14 +149,14 @@
 
 <div class="overflow-auto flex-1 min-w-0 mt-1">
   <table class="table-auto text-left text-sm w-full">
-    <tr class="border-b">
-      <th class="w-6">Eq.</th>
-      <th>Item</th>
-      <th>Zone</th>
-      <th class="w-14">Slots</th>
-      <th title="Equipment Quality (§9.3.1) - Weapon/Armor only">Qual.</th>
-      <th title="Condition (§9.3.3) - Weapon/Armor only. Degradation isn't automatic; click to record what happened.">Cond.</th>
-      <th>Notes</th>
+    <tr class="border-b sticky top-0 z-20 bg-gray-100 shadow-sm">
+      <th class="w-6 py-1">Eq.</th>
+      <th class="py-1">Item</th>
+      <th class="py-1">Zone</th>
+      <th class="w-14 py-1">Slots</th>
+      <th class="py-1" title="Equipment Quality (§9.3.1) - Weapon/Armor only">Qual.</th>
+      <th class="py-1" title="Condition (§9.3.3) - Weapon/Armor only. Degradation isn't automatic; click to record what happened.">Cond.</th>
+      <th class="py-1">Notes</th>
       <th></th>
     </tr>
     {#each $pc.injuries as inj (inj.id)}
@@ -214,16 +214,22 @@
     {/each}
     {#each GEAR_ZONES as zone}
       {@const zUsage = zoneUsage.find((z) => z.zone === zone)}
-      <tr class="border-y bg-gray-200">
-        <td colspan="8" class="px-2 py-1">
+      <tr class="border-y {zoneHeaderClass(zone)}">
+        <td colspan="8" class="px-2 py-1.5">
           <div class="flex items-center justify-between">
             <strong class="text-xs tracking-wide">{zone.toUpperCase()}</strong>
-            <span
-              class="text-xs rounded px-1.5 py-0.5 {zUsage && zUsage.used > zUsage.cap ? 'bg-red-600 text-white' : 'bg-gray-100'}"
-              title="{zone} zone capacity (§9.1.2) - a soft warning only, never enforced."
-            >
-              {zUsage?.used ?? 0}/{zUsage?.cap ?? 0} slots
-            </span>
+            {#if zUsage?.cap !== undefined}
+              <span
+                class="text-xs rounded px-1.5 py-0.5 {zUsage.used > zUsage.cap ? 'bg-red-600 text-white font-bold' : 'bg-white/70'}"
+                title="{zone} access capacity"
+              >
+                {zUsage.used}/{zUsage.cap} slots
+              </span>
+            {:else}
+              <span class="text-xs rounded px-1.5 py-0.5 bg-white/70" title="Counts against total STR inventory capacity">
+                {zUsage?.used ?? 0} slots
+              </span>
+            {/if}
           </div>
         </td>
       </tr>
