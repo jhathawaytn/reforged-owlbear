@@ -3,43 +3,58 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Reforged character sheet for Owlbear Rodeo." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons" />
     <title>Reforged Sheet</title>
     <style>
-      html, body { margin: 0; min-height: 100%; background: transparent; font-family: system-ui, sans-serif; }
-      body { display: grid; place-items: center; padding: 1rem; color: #333; }
-      .status { font-size: 12px; opacity: 0.7; }
+      html, body { margin: 0; min-height: 100%; background: #000; }
+      #loader-status {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: #ddd;
+        font: 12px system-ui, sans-serif;
+      }
     </style>
   </head>
   <body>
-    <div class="status" id="status">Loading latest Reforged build…</div>
-    <script>
-      (async () => {
-        const status = document.getElementById("status");
-        try {
-          const response = await fetch("./build.txt?ts=" + Date.now(), { cache: "no-store" });
-          if (!response.ok) throw new Error("build id unavailable");
-          const build = (await response.text()).trim();
-          if (!build) throw new Error("empty build id");
-          const current = new URL(window.location.href);
-          const target = new URL("./index.html", current);
-          for (const [key, value] of current.searchParams.entries()) {
-            target.searchParams.append(key, value);
-          }
-          target.searchParams.set("build", build.slice(0, 12));
-          target.hash = current.hash;
-          window.location.replace(target.toString());
-        } catch (error) {
-          status.textContent = "Opening Reforged…";
-          const current = new URL(window.location.href);
-          const fallback = new URL("./index.html", current);
-          for (const [key, value] of current.searchParams.entries()) {
-            fallback.searchParams.append(key, value);
-          }
-          fallback.searchParams.set("fallback", Date.now().toString());
-          fallback.hash = current.hash;
-          window.location.replace(fallback.toString());
+    <div id="app"></div>
+    <div id="loader-status">Loading latest Reforged build…</div>
+    <script type="module">
+      const status = document.getElementById("loader-status");
+      try {
+        const manifestUrl = new URL("./app-assets.json", window.location.href);
+        manifestUrl.searchParams.set("ts", Date.now().toString());
+        const response = await fetch(manifestUrl, { cache: "no-store" });
+        if (!response.ok) throw new Error(`build manifest HTTP ${response.status}`);
+
+        const assets = await response.json();
+        if (!assets?.script || !assets?.build) throw new Error("invalid build manifest");
+
+        window.__REFORGED_BUILD__ = assets.build;
+
+        for (const css of assets.styles ?? []) {
+          const link = document.createElement("link");
+          link.rel = "stylesheet";
+          link.href = new URL(css, window.location.href).toString();
+          document.head.appendChild(link);
         }
-      })();
+
+        status?.remove();
+
+        const scriptUrl = new URL(assets.script, window.location.href);
+        scriptUrl.searchParams.set("build", assets.build.slice(0, 12));
+        await import(scriptUrl.toString());
+      } catch (error) {
+        console.error("Reforged loader failed", error);
+        if (status) {
+          status.textContent = "Reforged failed to load the deployed build. Close and reopen the extension.";
+        }
+      }
     </script>
   </body>
 </html>

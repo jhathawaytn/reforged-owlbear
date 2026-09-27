@@ -35,7 +35,13 @@ export const isTrackedPlayerGM = derived(TrackedPlayer, ($trackedPlayer) => {
 
 export async function init() {
   OBR.onReady(async () => {
-    isGM.set((await OBR.player.getRole()) === "GM");
+    const role = await OBR.player.getRole();
+    isGM.set(role === "GM");
+
+    OBR.player.onChange((player) => {
+      isGM.set(player.role === "GM");
+      if (player.role === "GM") GmPlayer.set(player);
+    });
 
     subscribeToRoomNotifications();
     subscribeToHPNudges();
@@ -91,10 +97,21 @@ export async function sendHPNudge(targetPlayerId: string, delta: number, reason:
 }
 
 function initPartyPresence() {
+  const refresh = () => {
+    OBR.party.getPlayers().then((party) => PartyStore.set(party)).catch((error) => {
+      console.error("Failed to refresh Owlbear party", error);
+    });
+  };
+
   OBR.party.onChange((party) => {
     PartyStore.set(party);
   });
-  OBR.party.getPlayers().then((party) => PartyStore.set(party));
+
+  refresh();
+  // A room can already contain players while the action iframe is still
+  // establishing its SDK connection. Re-read once after startup so those
+  // existing connections are not missed if no join/leave event fires.
+  window.setTimeout(refresh, 750);
 }
 
 async function initGM() {
