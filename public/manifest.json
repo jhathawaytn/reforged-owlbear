@@ -1,0 +1,13 @@
+{
+  "name": "Reforged Sheet",
+  "version": "0.1.0",
+  "icon": "/icon.svg",
+  "manifest_version": 1,
+  "action": {
+    "title": "Reforged Sheet",
+    "icon": "/icon.svg",
+    "popover": "/",
+    "height": 780,
+    "width": 1060
+  }
+}

@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+h1,
+h2 {
+  font-family: "Cinzel", Georgia, Times, "Times New Roman", serif;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  font-size: 1.1rem;
+}
+
+h1 {
+  font-size: 1.75rem;
+}
+
+/* Reserved for short header/branding text only - never for gameplay
+   numbers (HP, Armor, Strain, etc). A stylized face on a plain digit
+   like "1" or "0" is genuinely hard to read at a glance mid-session. */
+.pirata {
+  font-family: "Cinzel", Georgia, Times, "Times New Roman", serif;
+  font-weight: 700;
+}
+
+input,
+select,
+textarea {
+  @apply bg-gray-200 p-1 rounded-md;
+}
+
+button,
+.btn {
+  @apply rounded-md hover:opacity-80 transition text-center;
+}
+
+.blk-btn {
+  @apply bg-black text-white p-1;
+}
