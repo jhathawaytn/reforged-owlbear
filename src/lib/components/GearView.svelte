@@ -204,73 +204,89 @@
         </td>
       </tr>
     {/each}
-    {#each $pc.gear as g (g.id)}
-      <tr class="border-b" class:opacity-50={g.usageDie === "depleted" || ($pc.backpackDropped && g.zone === "Backpack")} class:bg-red-50={g.usageDie === "depleted"}>
-        <td><input type="checkbox" class="w-auto" bind:checked={g.equipped} /></td>
-        <td>
-          <div class="flex items-center gap-1">
-            <input type="text" bind:value={g.name} placeholder="Hemp Rope, 50ft" />
-            {#if g.usageDie === "depleted"}
-              <span class="text-red-700 text-xs font-bold whitespace-nowrap">
-                {isFreedByDepletion(g) ? "USED UP" : "EMPTY"}
-              </span>
-            {/if}
+    {#each GEAR_ZONES as zone}
+      {@const zUsage = zoneUsage.find((z) => z.zone === zone)}
+      <tr class="border-y bg-gray-200">
+        <td colspan="8" class="px-2 py-1">
+          <div class="flex items-center justify-between">
+            <strong class="text-xs tracking-wide">{zone.toUpperCase()}</strong>
+            <span
+              class="text-xs rounded px-1.5 py-0.5 {zUsage && zUsage.used > zUsage.cap ? 'bg-red-600 text-white' : 'bg-gray-100'}"
+              title="{zone} zone capacity (§9.1.2) - a soft warning only, never enforced."
+            >
+              {zUsage?.used ?? 0}/{zUsage?.cap ?? 0} slots
+            </span>
           </div>
         </td>
-        <td>
-          <select bind:value={g.zone}>
-            {#each GEAR_ZONES as z}
-              <option value={z}>{z}</option>
-            {/each}
-          </select>
-        </td>
-        <td>
-          {#if isFreedByDepletion(g)}
-            <span class="text-gray-400" title="Used up - no longer carried">0</span>
-          {:else}
-            <input type="number" inputmode="numeric" min="0" bind:value={g.slots} class="w-12" />
-          {/if}
-        </td>
-        <td>
-          {#if g.durableCategory}
-            <select bind:value={g.quality} class="text-xs">
-              {#each QUALITIES as q}
-                <option value={q}>{q}</option>
+      </tr>
+      {#each $pc.gear.filter((g) => g.zone === zone) as g (g.id)}
+        <tr class="border-b" class:opacity-50={g.usageDie === "depleted" || ($pc.backpackDropped && g.zone === "Backpack")} class:bg-red-50={g.usageDie === "depleted"}>
+          <td><input type="checkbox" class="w-auto" bind:checked={g.equipped} /></td>
+          <td>
+            <div class="flex items-center gap-1">
+              <input type="text" bind:value={g.name} placeholder="Hemp Rope, 50ft" />
+              {#if g.usageDie === "depleted"}
+                <span class="text-red-700 text-xs font-bold whitespace-nowrap">
+                  {isFreedByDepletion(g) ? "USED UP" : "EMPTY"}
+                </span>
+              {/if}
+            </div>
+          </td>
+          <td>
+            <select bind:value={g.zone} on:change={() => ($pc.gear = $pc.gear)}>
+              {#each GEAR_ZONES as z}
+                <option value={z}>{z}</option>
               {/each}
             </select>
-          {:else}
-            <span class="text-gray-300">-</span>
-          {/if}
-        </td>
-        <td>
-          {#if g.durableCategory}
-            <div class="flex items-center gap-1 whitespace-nowrap">
-              <button class="px-1" title="Degrade one step" on:click={() => degrade(g)}>
-                <i class="material-icons text-xs">remove</i>
-              </button>
-              <span
-                class="text-xs font-bold {CONDITION_COLOR_CLASS[g.condition ?? 'Healthy']}"
-                title={g.quality === "Masterwork" && g.masterworkReserveSpent
-                  ? "Masterwork Reserve already spent"
-                  : g.quality}
-              >
-                {g.condition}{g.quality === "Masterwork" && !g.masterworkReserveSpent ? " (+Reserve)" : ""}
-              </span>
-              <button class="px-1" title="Repair one step" on:click={() => repair(g)}>
-                <i class="material-icons text-xs">add</i>
-              </button>
-            </div>
-          {:else}
-            <span class="text-gray-300">-</span>
-          {/if}
-        </td>
-        <td><input type="text" bind:value={g.notes} /></td>
-        <td>
-          <button class="text-red-700" on:click={() => removeGear(g)}>
-            <i class="material-icons text-sm">delete</i>
-          </button>
-        </td>
-      </tr>
+          </td>
+          <td>
+            {#if isFreedByDepletion(g)}
+              <span class="text-gray-400" title="Used up - no longer carried">0</span>
+            {:else}
+              <input type="number" inputmode="numeric" min="0" bind:value={g.slots} class="w-12" />
+            {/if}
+          </td>
+          <td>
+            {#if g.durableCategory}
+              <select bind:value={g.quality} class="text-xs">
+                {#each QUALITIES as q}
+                  <option value={q}>{q}</option>
+                {/each}
+              </select>
+            {:else}
+              <span class="text-gray-300">-</span>
+            {/if}
+          </td>
+          <td>
+            {#if g.durableCategory}
+              <div class="flex items-center gap-1 whitespace-nowrap">
+                <button class="px-1" title="Degrade one step" on:click={() => degrade(g)}>
+                  <i class="material-icons text-xs">remove</i>
+                </button>
+                <span
+                  class="text-xs font-bold {CONDITION_COLOR_CLASS[g.condition ?? 'Healthy']}"
+                  title={g.quality === "Masterwork" && g.masterworkReserveSpent
+                    ? "Masterwork Reserve already spent"
+                    : g.quality}
+                >
+                  {g.condition}{g.quality === "Masterwork" && !g.masterworkReserveSpent ? " (+Reserve)" : ""}
+                </span>
+                <button class="px-1" title="Repair one step" on:click={() => repair(g)}>
+                  <i class="material-icons text-xs">add</i>
+                </button>
+              </div>
+            {:else}
+              <span class="text-gray-300">-</span>
+            {/if}
+          </td>
+          <td><input type="text" bind:value={g.notes} /></td>
+          <td>
+            <button class="text-red-700" on:click={() => removeGear(g)}>
+              <i class="material-icons text-sm">delete</i>
+            </button>
+          </td>
+        </tr>
+      {/each}
     {/each}
   </table>
 </div>
