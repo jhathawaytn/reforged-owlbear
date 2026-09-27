@@ -8,12 +8,12 @@ export type TravelPace = "Cautious" | "Steady" | "Forced";
 
 export type WildernessActivity =
   | "Travel"
-  | "Rest"
-  | "Sleep"
-  | "Make Camp"
-  | "Forage"
+  | "Forage for Food"
+  | "Forage for Water"
   | "Hunt"
   | "Fish"
+  | "Make Camp"
+  | "Sleep"
   | "Other";
 
 export type WildernessRole = "Trailblazer" | "Keep Watch" | "Quartermaster";

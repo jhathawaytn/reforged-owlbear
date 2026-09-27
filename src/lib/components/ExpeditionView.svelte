@@ -9,13 +9,36 @@
     type TravelPace,
     type WildernessExpeditionState,
     type ExplorationExpeditionState,
+    type ExpeditionAssignment,
+    type WildernessActivity,
+    type WildernessRole,
   } from "../model/ExpeditionStore";
+
+  type CompanyMember = { id: string; name: string };
 
   const QUARTERS: TravelQuarter[] = ["Morning", "Day", "Evening", "Night"];
   const ROUTES: RouteMode[] = ["Known Route", "Unmapped Country"];
   const PACES: TravelPace[] = ["Cautious", "Steady", "Forced"];
+  const ACTIVITIES: WildernessActivity[] = [
+    "Travel",
+    "Forage for Food",
+    "Forage for Water",
+    "Hunt",
+    "Fish",
+    "Make Camp",
+    "Sleep",
+    "Other",
+  ];
+  const ROLES: WildernessRole[] = ["Trailblazer", "Keep Watch", "Quartermaster"];
 
   $: company = $PartyStore.map((p) => ({ id: p.id, name: p.name }));
+  $: assignedCompany = company.map((member) => ({
+    member,
+    assignment: assignmentFor(member.id),
+  }));
+  $: haltsForActivity = assignedCompany.some(({ assignment }) =>
+    ["Forage for Food", "Forage for Water", "Hunt", "Fish"].includes(assignment.activity),
+  );
 
   async function setMode(mode: ExpeditionMode) {
     if (!$isGM) return;
@@ -48,6 +71,83 @@
 
   function onPaceChange(e: Event) {
     patchWilderness({ pace: (e.currentTarget as HTMLSelectElement).value as TravelPace });
+  }
+
+  function assignmentFor(playerId: string): ExpeditionAssignment {
+    return (
+      $expedition.wilderness.assignments.find((a) => a.playerId === playerId) ?? {
+        playerId,
+        activity: "Travel",
+      }
+    );
+  }
+
+  function memberFor(playerId: string | undefined): CompanyMember | undefined {
+    if (!playerId) return undefined;
+    return company.find((p) => p.id === playerId);
+  }
+
+  function roleHolder(role: WildernessRole): ExpeditionAssignment | undefined {
+    return $expedition.wilderness.assignments.find((a) => a.role === role);
+  }
+
+  function membersForActivity(activity: WildernessActivity): { member: CompanyMember; assignment: ExpeditionAssignment }[] {
+    return assignedCompany.filter(({ assignment }) => assignment.activity === activity);
+  }
+
+  function incompatibleWithQuartermaster(activity: WildernessActivity): boolean {
+    return ["Forage for Food", "Forage for Water", "Hunt", "Fish"].includes(activity);
+  }
+
+  async function saveAssignment(nextAssignment: ExpeditionAssignment) {
+    const others = $expedition.wilderness.assignments.filter((a) => a.playerId !== nextAssignment.playerId);
+    await patchWilderness({ assignments: [...others, nextAssignment] });
+  }
+
+  async function onActivityChange(playerId: string, e: Event) {
+    if (!$isGM) return;
+    const activity = (e.currentTarget as HTMLSelectElement).value as WildernessActivity;
+    const current = assignmentFor(playerId);
+    let role = current.role;
+
+    // Trailblazer and Keep Watch are Travel Roles: the character remains Traveling.
+    if ((role === "Trailblazer" || role === "Keep Watch") && activity !== "Travel") {
+      role = undefined;
+    }
+
+    // Quartermaster may Travel or assist Make Camp, but cannot Forage, Hunt, or Fish.
+    if (role === "Quartermaster" && incompatibleWithQuartermaster(activity)) {
+      role = undefined;
+    }
+
+    await saveAssignment({ playerId, activity, role });
+  }
+
+  async function onRoleChange(playerId: string, e: Event) {
+    if (!$isGM) return;
+    const raw = (e.currentTarget as HTMLSelectElement).value;
+    const role = raw ? (raw as WildernessRole) : undefined;
+    const current = assignmentFor(playerId);
+    let activity = current.activity;
+
+    if (role === "Trailblazer" || role === "Keep Watch") {
+      activity = "Travel";
+    } else if (role === "Quartermaster" && incompatibleWithQuartermaster(activity)) {
+      activity = "Travel";
+    }
+
+    // Each Travel Role accepts one character. Assigning it here clears it from anyone else.
+    let assignments = $expedition.wilderness.assignments
+      .filter((a) => a.playerId !== playerId)
+      .map((a) => (role && a.role === role ? { ...a, role: undefined } : a));
+
+    assignments = [...assignments, { playerId, activity, role }];
+    await patchWilderness({ assignments });
+  }
+
+  async function resetAssignments() {
+    if (!$isGM) return;
+    await patchWilderness({ assignments: [] });
   }
 </script>
 
@@ -96,21 +196,13 @@
         <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2 text-xs">
           <label>
             Route
-            <select
-              disabled={!$isGM}
-              value={$expedition.wilderness.routeMode}
-              on:change={onRouteChange}
-            >
+            <select disabled={!$isGM} value={$expedition.wilderness.routeMode} on:change={onRouteChange}>
               {#each ROUTES as route}<option value={route}>{route}</option>{/each}
             </select>
           </label>
           <label>
             Pace
-            <select
-              disabled={!$isGM}
-              value={$expedition.wilderness.pace}
-              on:change={onPaceChange}
-            >
+            <select disabled={!$isGM} value={$expedition.wilderness.pace} on:change={onPaceChange}>
               {#each PACES as pace}<option value={pace}>{pace}</option>{/each}
             </select>
           </label>
@@ -176,25 +268,105 @@
           </div>
         </div>
 
-        <div class="mt-3 border rounded-md p-2 bg-gray-50">
-          <div class="font-bold text-xs">Quarter Activities & Travel Roles</div>
-          <div class="text-[10px] text-gray-500 mt-1">
-            Assignment/resolution controls land in the next pass. This shared board is now the authoritative Company travel state.
+        <div class="mt-3">
+          <div class="flex items-center justify-between gap-2 mb-1">
+            <div>
+              <div class="font-bold text-xs">Travel Roles</div>
+              <div class="text-[10px] text-gray-500">Roles are performed while Traveling; each role accepts one character.</div>
+            </div>
+            {#if $isGM}
+              <button class="border rounded-md px-2 py-1 text-[10px]" on:click={resetAssignments}>Reset Assignments</button>
+            {/if}
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-1">
+            {#each ROLES as role}
+              {@const holder = roleHolder(role)}
+              <div class="assignment-card">
+                <div class="font-bold text-xs">{role}</div>
+                {#if holder}
+                  <div class="flex items-center gap-1 mt-1 text-xs">
+                    <i class="material-icons text-sm">person</i>
+                    <span class="truncate">{memberFor(holder.playerId)?.name ?? "Disconnected character"}</span>
+                  </div>
+                {:else}
+                  <div class="text-[10px] text-gray-400 mt-1">Unassigned</div>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        </div>
+
+        <div class="mt-3">
+          <div class="flex items-center justify-between gap-2">
+            <div>
+              <div class="font-bold text-xs">Quarter Activities</div>
+              <div class="text-[10px] text-gray-500">Each character takes one Activity this Quarter.</div>
+            </div>
+            {#if haltsForActivity}
+              <div class="text-[10px] font-bold text-red-700 border border-red-300 bg-red-50 rounded px-2 py-1">
+                Company halts — no travel progress this Quarter.
+              </div>
+            {/if}
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-1 mt-1">
+            {#each ACTIVITIES as activity}
+              {@const members = membersForActivity(activity)}
+              <div class="assignment-card min-h-[74px]">
+                <div class="font-bold text-xs">{activity}</div>
+                {#if members.length}
+                  <div class="flex flex-col gap-1 mt-1">
+                    {#each members as entry}
+                      <div class="flex items-center gap-1 text-xs min-w-0">
+                        <i class="material-icons text-sm">person</i>
+                        <span class="truncate">{entry.member.name}</span>
+                        {#if entry.assignment.role}
+                          <span class="role-chip">{entry.assignment.role}</span>
+                        {/if}
+                      </div>
+                    {/each}
+                  </div>
+                {:else}
+                  <div class="text-[10px] text-gray-400 mt-1">—</div>
+                {/if}
+              </div>
+            {/each}
           </div>
         </div>
       </div>
 
       <div class="exp-cell min-h-0 overflow-y-auto">
-        <h2>COMPANY</h2>
+        <h2>COMPANY ASSIGNMENTS</h2>
         <div class="text-[10px] text-gray-500 mb-2">
-          Connected Owlbear players currently available for expedition assignments.
+          Choose each character's Quarter Activity and optional Travel Role. Everyone defaults to Travel.
         </div>
         {#if company.length}
-          <div class="flex flex-col gap-1">
+          <div class="flex flex-col gap-2">
             {#each company as p}
-              <div class="border rounded-md px-2 py-1 text-xs flex items-center gap-2">
-                <i class="material-icons text-sm">person</i>
-                <span class="truncate">{p.name}</span>
+              {@const assignment = assignmentFor(p.id)}
+              <div class="border rounded-md p-2 text-xs">
+                <div class="font-bold flex items-center gap-1 mb-1">
+                  <i class="material-icons text-sm">person</i>
+                  <span class="truncate">{p.name}</span>
+                </div>
+                <label class="block">
+                  Activity
+                  <select disabled={!$isGM} value={assignment.activity} on:change={(e) => onActivityChange(p.id, e)}>
+                    {#each ACTIVITIES as activity}
+                      <option value={activity}>{activity}</option>
+                    {/each}
+                  </select>
+                </label>
+                <label class="block mt-1">
+                  Travel Role
+                  <select disabled={!$isGM} value={assignment.role ?? ""} on:change={(e) => onRoleChange(p.id, e)}>
+                    <option value="">None</option>
+                    {#each ROLES as role}
+                      <option value={role}>{role}</option>
+                    {/each}
+                  </select>
+                </label>
               </div>
             {/each}
           </div>
@@ -277,11 +449,18 @@
   {/if}
 </div>
 
-
 <style lang="postcss">
   .exp-cell {
     @apply bg-white p-2 flex flex-col relative rounded-lg min-w-0;
     box-shadow: inset 0 0 5px #000;
+  }
+
+  .assignment-card {
+    @apply border rounded-md p-2 bg-gray-50 min-w-0;
+  }
+
+  .role-chip {
+    @apply ml-auto text-[9px] px-1 rounded bg-black text-white whitespace-nowrap;
   }
 
   input,
