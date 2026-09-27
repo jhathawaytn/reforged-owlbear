@@ -203,7 +203,7 @@ export async function rollReforgedSave(
       kept?.value ??
       (mode === "advantage"
         ? Math.min(...dice.map((d) => d.value))
-        : Math.max(...dice.map((d) => d.value));
+        : Math.max(...dice.map((d) => d.value)));
     const keptIndex = kept ? dice.indexOf(kept) : dice.findIndex((d) => d.value === natural);
     otherRoll = dice.find((_, index) => index !== keptIndex)?.value;
   }
