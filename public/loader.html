@@ -20,13 +20,23 @@
           if (!response.ok) throw new Error("build id unavailable");
           const build = (await response.text()).trim();
           if (!build) throw new Error("empty build id");
-          const target = new URL("./index.html", window.location.href);
+          const current = new URL(window.location.href);
+          const target = new URL("./index.html", current);
+          for (const [key, value] of current.searchParams.entries()) {
+            target.searchParams.append(key, value);
+          }
           target.searchParams.set("build", build.slice(0, 12));
+          target.hash = current.hash;
           window.location.replace(target.toString());
         } catch (error) {
           status.textContent = "Opening Reforged…";
-          const fallback = new URL("./index.html", window.location.href);
+          const current = new URL(window.location.href);
+          const fallback = new URL("./index.html", current);
+          for (const [key, value] of current.searchParams.entries()) {
+            fallback.searchParams.append(key, value);
+          }
           fallback.searchParams.set("fallback", Date.now().toString());
+          fallback.hash = current.hash;
           window.location.replace(fallback.toString());
         }
       })();
