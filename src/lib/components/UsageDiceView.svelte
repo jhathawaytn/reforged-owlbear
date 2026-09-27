@@ -8,6 +8,12 @@
 
   $: usageItems = $pc.gear.filter((g) => g.usageDie !== undefined);
 
+  function displayName(item: GearItem): string {
+    const matches = usageItems.filter((g) => g.name === item.name);
+    if (matches.length <= 1) return item.name;
+    return `${item.name} #${matches.findIndex((g) => g.id === item.id) + 1}`;
+  }
+
   function checkUsageDie(item: GearItem) {
     if (!item.usageDie || item.usageDie === "depleted") return;
     const sides = DIE_SIDES[item.usageDie];
@@ -44,7 +50,7 @@
     {#each usageItems as item (item.id)}
       <div class="flex flex-col items-center gap-1 border rounded-md p-1 w-24 shrink-0">
         <DieIcon size={item.usageDie} />
-        <span class="text-xs text-center leading-tight">{item.name}</span>
+        <span class="text-xs text-center leading-tight">{displayName(item)}</span>
         <div class="flex gap-1">
           <button
             class="bg-black text-white text-xs px-1 rounded-md"
