@@ -40,11 +40,15 @@
       activity: "Travel" as WildernessActivity,
     },
   }));
-  $: roleHolders = {
-    Trailblazer: currentAssignments.find((a) => a.role === "Trailblazer"),
-    "Keep Watch": currentAssignments.find((a) => a.role === "Keep Watch"),
-    Quartermaster: currentAssignments.find((a) => a.role === "Quartermaster"),
-  };
+  $: roleCards = ROLES.map((role) => {
+    const assignment = currentAssignments.find((a) => a.role === role);
+    const member = assignment ? company.find((p) => p.id === assignment.playerId) : undefined;
+    return { role, assignment, member };
+  });
+  $: activityCards = ACTIVITIES.map((activity) => ({
+    activity,
+    members: assignedCompany.filter(({ assignment }) => assignment.activity === activity),
+  }));
   $: haltsForActivity = assignedCompany.some(({ assignment }) =>
     ["Forage for Food", "Forage for Water", "Hunt", "Fish"].includes(assignment.activity),
   );
@@ -89,19 +93,6 @@
         activity: "Travel",
       }
     );
-  }
-
-  function memberFor(playerId: string | undefined): CompanyMember | undefined {
-    if (!playerId) return undefined;
-    return company.find((p) => p.id === playerId);
-  }
-
-  function roleHolder(role: WildernessRole): ExpeditionAssignment | undefined {
-    return roleHolders[role];
-  }
-
-  function membersForActivity(activity: WildernessActivity): { member: CompanyMember; assignment: ExpeditionAssignment }[] {
-    return assignedCompany.filter(({ assignment }) => assignment.activity === activity);
   }
 
   function incompatibleWithQuartermaster(activity: WildernessActivity): boolean {
@@ -289,14 +280,13 @@
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-3 gap-1">
-            {#each ROLES as role}
-              {@const holder = roleHolder(role)}
+            {#each roleCards as card (card.role)}
               <div class="assignment-card">
-                <div class="font-bold text-xs">{role}</div>
-                {#if holder}
+                <div class="font-bold text-xs">{card.role}</div>
+                {#if card.assignment}
                   <div class="flex items-center gap-1 mt-1 text-xs">
                     <i class="material-icons text-sm">person</i>
-                    <span class="truncate">{memberFor(holder.playerId)?.name ?? "Disconnected character"}</span>
+                    <span class="truncate">{card.member?.name ?? "Disconnected character"}</span>
                   </div>
                 {:else}
                   <div class="text-[10px] text-gray-400 mt-1">Unassigned</div>
@@ -320,13 +310,12 @@
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-3 gap-1 mt-1">
-            {#each ACTIVITIES as activity}
-              {@const members = membersForActivity(activity)}
+            {#each activityCards as card (card.activity)}
               <div class="assignment-card min-h-[74px]">
-                <div class="font-bold text-xs">{activity}</div>
-                {#if members.length}
+                <div class="font-bold text-xs">{card.activity}</div>
+                {#if card.members.length}
                   <div class="flex flex-col gap-1 mt-1">
-                    {#each members as entry}
+                    {#each card.members as entry (entry.member.id)}
                       <div class="flex items-center gap-1 text-xs min-w-0">
                         <i class="material-icons text-sm">person</i>
                         <span class="truncate">{entry.member.name}</span>
