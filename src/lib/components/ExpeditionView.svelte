@@ -193,7 +193,7 @@
           <span class="text-xs font-bold">Day {$expedition.wilderness.day}</span>
         </div>
 
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2 text-xs">
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-2 mt-2 text-xs">
           <label>
             Route
             <select disabled={!$isGM} value={$expedition.wilderness.routeMode} on:change={onRouteChange}>
@@ -214,43 +214,53 @@
               on:change={(e) => patchWilderness({ weather: e.currentTarget.value })}
             />
           </label>
-          <label>
-            Target Quarters
-            <input
-              type="number"
-              min="0"
-              disabled={!$isGM}
-              value={$expedition.wilderness.targetQuarters}
-              on:change={(e) => patchWilderness({ targetQuarters: parseInt(e.currentTarget.value) || 0 })}
-            />
-          </label>
         </div>
 
-        <div class="grid grid-cols-2 gap-2 mt-2 text-xs">
-          <label>
-            From
+        <div class="mt-2 text-xs">
+          <div class="font-bold mb-0.5">Journey</div>
+          <div class="grid grid-cols-[1fr_auto_1fr] gap-2 items-center">
             <input
               disabled={!$isGM}
               value={$expedition.wilderness.currentLocation}
-              placeholder="Current location"
+              placeholder="Origin"
+              aria-label="Journey origin"
               on:change={(e) => patchWilderness({ currentLocation: e.currentTarget.value })}
             />
-          </label>
-          <label>
-            To
+            <i class="material-icons text-base text-gray-500">arrow_forward</i>
             <input
               disabled={!$isGM}
               value={$expedition.wilderness.destination}
               placeholder="Destination"
+              aria-label="Journey destination"
               on:change={(e) => patchWilderness({ destination: e.currentTarget.value })}
             />
-          </label>
+          </div>
         </div>
+
+        {#if $expedition.wilderness.routeMode === "Known Route"}
+          <label class="block mt-2 text-xs max-w-[180px]">
+            Recorded Route Time
+            <div class="flex items-center gap-1">
+              <input
+                type="number"
+                min="0"
+                disabled={!$isGM}
+                value={$expedition.wilderness.routeTimeQuarters}
+                on:change={(e) => patchWilderness({ routeTimeQuarters: parseInt(e.currentTarget.value) || 0 })}
+              />
+              <span class="text-[10px] text-gray-500 whitespace-nowrap">Quarters</span>
+            </div>
+          </label>
+        {/if}
 
         <div class="mt-3">
           <div class="flex items-center justify-between text-xs mb-1">
             <span class="font-bold">Travel Phase</span>
-            <span>{$expedition.wilderness.progress} / {$expedition.wilderness.targetQuarters || "?"} Quarters</span>
+            {#if $expedition.wilderness.routeMode === "Known Route"}
+              <span>{$expedition.wilderness.progress} / {$expedition.wilderness.routeTimeQuarters || "?"} Quarters</span>
+            {:else}
+              <span>{$expedition.wilderness.progress} successful travel {$expedition.wilderness.progress === 1 ? "Quarter" : "Quarters"}</span>
+            {/if}
           </div>
           <div class="grid grid-cols-4 gap-1">
             {#each QUARTERS as q}
