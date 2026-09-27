@@ -41,6 +41,14 @@
   function quarterIndex(q: TravelQuarter): number {
     return QUARTERS.indexOf(q);
   }
+
+  function onRouteChange(e: Event) {
+    patchWilderness({ routeMode: (e.currentTarget as HTMLSelectElement).value as RouteMode });
+  }
+
+  function onPaceChange(e: Event) {
+    patchWilderness({ pace: (e.currentTarget as HTMLSelectElement).value as TravelPace });
+  }
 </script>
 
 <div class="w-full h-full flex flex-col gap-2">
@@ -91,7 +99,7 @@
             <select
               disabled={!$isGM}
               value={$expedition.wilderness.routeMode}
-              on:change={(e) => patchWilderness({ routeMode: e.currentTarget.value as RouteMode })}
+              on:change={onRouteChange}
             >
               {#each ROUTES as route}<option value={route}>{route}</option>{/each}
             </select>
@@ -101,7 +109,7 @@
             <select
               disabled={!$isGM}
               value={$expedition.wilderness.pace}
-              on:change={(e) => patchWilderness({ pace: e.currentTarget.value as TravelPace })}
+              on:change={onPaceChange}
             >
               {#each PACES as pace}<option value={pace}>{pace}</option>{/each}
             </select>
