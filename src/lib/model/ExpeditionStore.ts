@@ -33,7 +33,7 @@ export type WildernessExpeditionState = {
   currentLocation: string;
   destination: string;
   progress: number;
-  targetQuarters: number;
+  routeTimeQuarters: number;
   assignments: ExpeditionAssignment[];
 };
 
@@ -63,7 +63,7 @@ export const defaultExpeditionState = (): ExpeditionState => ({
     currentLocation: "",
     destination: "",
     progress: 0,
-    targetQuarters: 0,
+    routeTimeQuarters: 0,
     assignments: [],
   },
   exploration: {
@@ -81,10 +81,18 @@ const EXPEDITION_METADATA_KEY = "rodeo.owlbear.reforged-sheet/expedition";
 function withDefaults(value: Partial<ExpeditionState> | undefined): ExpeditionState {
   const base = defaultExpeditionState();
   if (!value) return base;
+  const legacyWilderness = (value.wilderness ?? {}) as Partial<WildernessExpeditionState> & {
+    targetQuarters?: number;
+  };
   return {
     ...base,
     ...value,
-    wilderness: { ...base.wilderness, ...(value.wilderness ?? {}) },
+    wilderness: {
+      ...base.wilderness,
+      ...legacyWilderness,
+      routeTimeQuarters:
+        legacyWilderness.routeTimeQuarters ?? legacyWilderness.targetQuarters ?? base.wilderness.routeTimeQuarters,
+    },
     exploration: { ...base.exploration, ...(value.exploration ?? {}) },
   };
 }
