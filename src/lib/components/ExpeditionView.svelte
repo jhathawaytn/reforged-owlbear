@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { isGM, PartyStore, ReforgedPresenceStore } from "../services/OBRHelper";
-  import OBR from "@owlbear-rodeo/sdk";
+  import { isGM, CurrentPlayerId, PartyStore, ReforgedPresenceStore } from "../services/OBRHelper";
   import {
     ExpeditionStore as expedition,
     saveExpeditionState,
@@ -63,13 +62,13 @@
     const merged = new Map<string, CompanyMember>();
 
     for (const player of $PartyStore) {
-      if (player.id !== OBR.player.id && player.role === "PLAYER") {
+      if (player.id !== $CurrentPlayerId && player.role === "PLAYER") {
         merged.set(player.id, { id: player.id, name: player.name });
       }
     }
 
     for (const client of $ReforgedPresenceStore) {
-      if (client.id !== OBR.player.id && client.role === "PLAYER") {
+      if (client.id !== $CurrentPlayerId && client.role === "PLAYER") {
         merged.set(client.id, { id: client.id, name: client.name });
       }
     }
@@ -696,7 +695,7 @@
         </div>
         <div class="text-[9px] text-gray-400 mb-2">
           Owlbear party: {$PartyStore.filter((p) => p.role === "PLAYER").length}
-          · Reforged clients: {$ReforgedPresenceStore.filter((p) => p.role === "PLAYER" && p.id !== OBR.player.id).length}
+          · Reforged clients: {$ReforgedPresenceStore.filter((p) => p.role === "PLAYER" && p.id !== $CurrentPlayerId).length}
         </div>
         {#if company.length}
           <div class="flex flex-col gap-2">
