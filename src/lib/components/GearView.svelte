@@ -15,7 +15,7 @@
     PERMANENT_INJURY_CONSEQUENCE,
     CONDITION_COLOR_CLASS,
   } from "../types";
-  import type { GearItem, Injury } from "../types";
+  import type { GearItem, GearZone, Injury } from "../types";
   import GearShopButton from "./gear/GearShopButton.svelte";
   import { applyStartingKit } from "../compendium";
 
@@ -31,6 +31,14 @@
   }
   function removeGear(g: GearItem) {
     $pc.gear = $pc.gear.filter((x) => x.id !== g.id);
+  }
+
+  function changeGearZone(g: GearItem, event: Event) {
+    const zone = (event.currentTarget as HTMLSelectElement).value as GearZone;
+    pc.set({
+      ...$pc,
+      gear: $pc.gear.map((item) => (item.id === g.id ? { ...item, zone } : item)),
+    });
   }
 
   function addInjury() {
@@ -233,7 +241,7 @@
             </div>
           </td>
           <td>
-            <select bind:value={g.zone} on:change={() => ($pc.gear = $pc.gear)}>
+            <select value={g.zone} on:change={(event) => changeGearZone(g, event)}>
               {#each GEAR_ZONES as z}
                 <option value={z}>{z}</option>
               {/each}
