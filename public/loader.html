@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Reforged Sheet</title>
+    <style>
+      html, body { margin: 0; min-height: 100%; background: transparent; font-family: system-ui, sans-serif; }
+      body { display: grid; place-items: center; padding: 1rem; color: #333; }
+      .status { font-size: 12px; opacity: 0.7; }
+    </style>
+  </head>
+  <body>
+    <div class="status" id="status">Loading latest Reforged build…</div>
+    <script>
+      (async () => {
+        const status = document.getElementById("status");
+        try {
+          const response = await fetch("./build.txt?ts=" + Date.now(), { cache: "no-store" });
+          if (!response.ok) throw new Error("build id unavailable");
+          const build = (await response.text()).trim();
+          if (!build) throw new Error("empty build id");
+          const target = new URL("./index.html", window.location.href);
+          target.searchParams.set("build", build.slice(0, 12));
+          window.location.replace(target.toString());
+        } catch (error) {
+          status.textContent = "Opening Reforged…";
+          const fallback = new URL("./index.html", window.location.href);
+          fallback.searchParams.set("fallback", Date.now().toString());
+          window.location.replace(fallback.toString());
+        }
+      })();
+    </script>
+  </body>
+</html>

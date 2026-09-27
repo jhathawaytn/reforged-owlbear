@@ -25,20 +25,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx vite build
-      - name: Cache-bust extension popover URL
-        run: |
-          node - <<'NODE'
-          const fs = require("fs");
-          const path = "dist/manifest.json";
-          const manifest = JSON.parse(fs.readFileSync(path, "utf8"));
-          const sha = process.env.GITHUB_SHA.slice(0, 8);
-          const url = new URL(manifest.action.popover);
-          url.searchParams.set("build", sha);
-          manifest.action.popover = url.toString();
-          fs.writeFileSync(path, JSON.stringify(manifest, null, 2) + "\n");
-          fs.writeFileSync("dist/build.txt", process.env.GITHUB_SHA + "\n");
-          console.log("Popover URL:", manifest.action.popover);
-          NODE
+      - name: Write deployed build id
+        run: printf '%s\n' "$GITHUB_SHA" > dist/build.txt
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
