@@ -53,6 +53,7 @@
   ];
   const ROLES: WildernessRole[] = ["Trailblazer", "Keep Watch", "Quartermaster"];
 
+  let company: CompanyMember[] = [];
   let quarterTasks: QuarterTask[] = [];
   let quarterPlanActive = false;
   let quarterMessage = "";
