@@ -33,6 +33,7 @@ export type ReforgedPresence = {
 
 export const isGM = writable(false);
 export const CurrentPlayerId = writable("");
+export const CurrentPlayerName = writable("");
 export const PartyStore = writable<Player[]>([]);
 export const ReforgedPresenceStore = writable<ReforgedPresence[]>([]);
 export const TrackedPlayer = writable<string>();
@@ -46,10 +47,13 @@ export const isTrackedPlayerGM = derived(TrackedPlayer, ($trackedPlayer) => {
 export async function init() {
   OBR.onReady(async () => {
     CurrentPlayerId.set(OBR.player.id);
+    CurrentPlayerName.set(await OBR.player.getName());
     const role = await OBR.player.getRole();
     isGM.set(role === "GM");
 
     OBR.player.onChange((player) => {
+      CurrentPlayerId.set(player.id);
+      CurrentPlayerName.set(player.name);
       isGM.set(player.role === "GM");
       if (player.role === "GM") GmPlayer.set(player);
     });

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { isGM, CurrentPlayerId, PartyStore, ReforgedPresenceStore } from "../services/OBRHelper";
+  import { isGM, CurrentPlayerId, CurrentPlayerName, PartyStore, ReforgedPresenceStore } from "../services/OBRHelper";
   import {
     ExpeditionStore as expedition,
     saveExpeditionState,
@@ -87,6 +87,15 @@
       if (client.id !== $CurrentPlayerId && client.role === "PLAYER") {
         merged.set(client.id, { id: client.id, name: client.name });
       }
+    }
+
+    // OBR.party returns the other room participants, not this client.
+    // A player must still see their own Company assignment and role.
+    if (!$isGM && $CurrentPlayerId) {
+      merged.set($CurrentPlayerId, {
+        id: $CurrentPlayerId,
+        name: $CurrentPlayerName || "You",
+      });
     }
 
     company = [...merged.values()];
