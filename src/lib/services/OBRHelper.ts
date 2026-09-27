@@ -28,6 +28,10 @@ export type ReforgedPresence = {
   connectionId: string;
   name: string;
   role: "GM" | "PLAYER";
+  characterName: string;
+  wildernessCraftRank: number;
+  detectionRank: number;
+  quartermasterQualified: boolean;
   lastSeen: number;
 };
 
@@ -120,8 +124,29 @@ type PresenceMessage = {
   connectionId: string;
   name: string;
   role: "GM" | "PLAYER";
+  characterName?: string;
+  wildernessCraftRank?: number;
+  detectionRank?: number;
+  quartermasterQualified?: boolean;
   timestamp: number;
 };
+
+function rankForTree(pc: ReforgedCharacter, tree: "Wilderness Craft" | "Detection"): number {
+  let highest = 0;
+  for (const node of pc.skillTreeNodes) {
+    if (node.tree !== tree) continue;
+    const match = node.node.match(/^R([1-4])$/);
+    if (match) highest = Math.max(highest, parseInt(match[1], 10));
+  }
+  return highest;
+}
+
+function hasQuartermasterCapability(pc: ReforgedCharacter): boolean {
+  return (
+    pc.talentsOwned.some((talent) => talent.name === "Quartermaster") ||
+    /\bQuartermaster\b/i.test(pc.skillsAndTalents ?? "")
+  );
+}
 
 function upsertReforgedPresence(message: PresenceMessage) {
   ReforgedPresenceStore.update((current) => {
@@ -133,6 +158,10 @@ function upsertReforgedPresence(message: PresenceMessage) {
       connectionId: message.connectionId,
       name: message.name,
       role: message.role,
+      characterName: message.characterName ?? "",
+      wildernessCraftRank: message.wildernessCraftRank ?? 0,
+      detectionRank: message.detectionRank ?? 0,
+      quartermasterQualified: message.quartermasterQualified ?? false,
       lastSeen: Date.now(),
     });
     return next;
@@ -147,12 +176,17 @@ function pruneReforgedPresence() {
 function initReforgedPresence() {
   const announce = async (type: "hello" | "announce") => {
     try {
+      const pc = get(PlayerCharacterStore);
       const message: PresenceMessage = {
         type,
         id: OBR.player.id,
         connectionId: await OBR.player.getConnectionId(),
         name: await OBR.player.getName(),
         role: await OBR.player.getRole(),
+        characterName: pc.name ?? "",
+        wildernessCraftRank: rankForTree(pc, "Wilderness Craft"),
+        detectionRank: rankForTree(pc, "Detection"),
+        quartermasterQualified: hasQuartermasterCapability(pc),
         timestamp: Date.now(),
       };
       upsertReforgedPresence(message);

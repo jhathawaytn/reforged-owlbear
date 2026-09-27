@@ -194,6 +194,7 @@ export async function rollReforgedSave(
   if (!dice.length) return rollSaveLocal(targetAttribute, modifier, mode);
   let natural: number;
   let otherRoll: number | undefined;
+  const firstRoll = dice[0]?.value ?? external.result.totalValue - modifier;
 
   if (mode === "normal") {
     natural = dice[0]?.value ?? external.result.totalValue - modifier;
@@ -210,10 +211,10 @@ export async function rollReforgedSave(
 
   const total = natural + modifier;
   if (natural === 1) {
-    return { natural, otherRoll, modifier, total, success: true, autoResult: "success" };
+    return { natural, firstRoll, otherRoll, modifier, total, success: true, autoResult: "success" };
   }
   if (natural === 20) {
-    return { natural, otherRoll, modifier, total, success: false, autoResult: "failure" };
+    return { natural, firstRoll, otherRoll, modifier, total, success: false, autoResult: "failure" };
   }
-  return { natural, otherRoll, modifier, total, success: total <= targetAttribute };
+  return { natural, firstRoll, otherRoll, modifier, total, success: total <= targetAttribute };
 }

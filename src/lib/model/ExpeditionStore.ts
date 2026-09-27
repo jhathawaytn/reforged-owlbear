@@ -26,6 +26,27 @@ export type WildernessActivity =
 
 export type WildernessRole = "Trailblazer" | "Keep Watch" | "Quartermaster";
 
+export type CompanyNpcKind =
+  | "Guide Hireling"
+  | "Camp Hand Hireling"
+  | "Scout Henchman"
+  | "Professional Quartermaster"
+  | "Apprentice"
+  | "Other";
+
+export type CompanyNpc = {
+  id: string;
+  name: string;
+  kind: CompanyNpcKind;
+  level: number;
+  attributes: { STR: number; DEX: number; INT: number; WIL: number };
+  wildernessCraftRank: number;
+  detectionRank: number;
+  quartermasterQualified: boolean;
+  fatigue: number;
+  notes: string;
+};
+
 export type ExpeditionAssignment = {
   playerId: string;
   activity: WildernessActivity;
@@ -50,6 +71,11 @@ export type WildernessExpeditionState = {
   weatherExtremeCandidate: "" | "Cold Snap" | "Heat Wave";
   travelQuartersToday: number;
   forcedMarchStoppedPlayerIds: string[];
+  companyNpcs: CompanyNpc[];
+  makeCampLeaderId: string;
+  quartermasterTodayId: string;
+  quartermasterCoveredTravelQuarters: number;
+  quartermasterMissedToday: boolean;
   currentLocation: string;
   destination: string;
   progress: number;
@@ -92,6 +118,11 @@ export const defaultExpeditionState = (): ExpeditionState => ({
     weatherExtremeCandidate: "",
     travelQuartersToday: 0,
     forcedMarchStoppedPlayerIds: [],
+    companyNpcs: [],
+    makeCampLeaderId: "",
+    quartermasterTodayId: "",
+    quartermasterCoveredTravelQuarters: 0,
+    quartermasterMissedToday: false,
     currentLocation: "",
     destination: "",
     progress: 0,

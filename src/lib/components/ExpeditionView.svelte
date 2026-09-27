@@ -1,5 +1,12 @@
 <script lang="ts">
-  import { isGM, CurrentPlayerId, CurrentPlayerName, PartyStore, ReforgedPresenceStore } from "../services/OBRHelper";
+  import {
+    isGM,
+    CurrentPlayerId,
+    CurrentPlayerName,
+    PartyStore,
+    ReforgedPresenceStore,
+    type ReforgedPresence,
+  } from "../services/OBRHelper";
   import {
     ExpeditionStore as expedition,
     saveExpeditionState,
@@ -15,6 +22,8 @@
     type ExpeditionAssignment,
     type WildernessActivity,
     type WildernessRole,
+    type CompanyNpc,
+    type CompanyNpcKind,
   } from "../model/ExpeditionStore";
   import {
     PendingExpeditionRollStore,
@@ -25,10 +34,20 @@
     type ExpeditionRollKind,
     type ExpeditionRollResponse,
     type ExpeditionAttributeMode,
+    type ExpeditionSkill,
+    expeditionRollMode,
+    resolveExpeditionOutcome,
   } from "../services/ExpeditionRolls";
-  import { rollDiceValues } from "../services/DicePlus";
+  import { rollDiceValues, rollReforgedSave } from "../services/DicePlus";
+  import { newId } from "../utils";
 
-  type CompanyMember = { id: string; name: string };
+  type CompanyMember = {
+    id: string;
+    name: string;
+    source: "player" | "npc";
+    presence?: ReforgedPresence;
+    npc?: CompanyNpc;
+  };
   type QuarterTask = {
     id: string;
     kind: ExpeditionRollKind;
@@ -36,7 +55,8 @@
     playerName: string;
     attributeMode: ExpeditionAttributeMode;
     baseModifier: number;
-    useWildernessCraft: boolean;
+    skill?: ExpeditionSkill;
+    untrainedDisadvantage: boolean;
     hasAdvantage: boolean;
     hasDisadvantage: boolean;
     applyFailureFatigue: boolean;
@@ -67,35 +87,70 @@
     "Other",
   ];
   const ROLES: WildernessRole[] = ["Trailblazer", "Keep Watch", "Quartermaster"];
+  const NPC_KINDS: CompanyNpcKind[] = [
+    "Guide Hireling",
+    "Camp Hand Hireling",
+    "Scout Henchman",
+    "Professional Quartermaster",
+    "Apprentice",
+    "Other",
+  ];
+  const RANKS = [0, 1, 2, 3, 4];
 
   let company: CompanyMember[] = [];
   let quarterTasks: QuarterTask[] = [];
   let quarterPlanActive = false;
   let quarterMessage = "";
   let dayMessage = "";
+  let watchMessage = "";
+  let watchTask: QuarterTask | null = null;
   let playerRollBusy = false;
+  let npcName = "";
+  let npcKind: CompanyNpcKind = "Guide Hireling";
+  let npcLevel = 1;
+  let npcNotes = "";
 
   $: {
     const merged = new Map<string, CompanyMember>();
+    const presenceById = new Map($ReforgedPresenceStore.map((client) => [client.id, client]));
 
     for (const player of $PartyStore) {
-      if (player.id !== $CurrentPlayerId && player.role === "PLAYER") {
-        merged.set(player.id, { id: player.id, name: player.name });
-      }
+      if (player.id === $CurrentPlayerId || player.role !== "PLAYER") continue;
+      const presence = presenceById.get(player.id);
+      merged.set(player.id, {
+        id: player.id,
+        name: presence?.characterName || player.name,
+        source: "player",
+        presence,
+      });
     }
 
     for (const client of $ReforgedPresenceStore) {
-      if (client.id !== $CurrentPlayerId && client.role === "PLAYER") {
-        merged.set(client.id, { id: client.id, name: client.name });
-      }
+      if (client.id === $CurrentPlayerId || client.role !== "PLAYER") continue;
+      merged.set(client.id, {
+        id: client.id,
+        name: client.characterName || client.name,
+        source: "player",
+        presence: client,
+      });
     }
 
-    // OBR.party returns the other room participants, not this client.
-    // A player must still see their own Company assignment and role.
     if (!$isGM && $CurrentPlayerId) {
+      const self = presenceById.get($CurrentPlayerId);
       merged.set($CurrentPlayerId, {
         id: $CurrentPlayerId,
-        name: $CurrentPlayerName || "You",
+        name: self?.characterName || self?.name || $CurrentPlayerName || "You",
+        source: "player",
+        presence: self,
+      });
+    }
+
+    for (const npc of $expedition.wilderness.companyNpcs) {
+      merged.set(npc.id, {
+        id: npc.id,
+        name: npc.name,
+        source: "npc",
+        npc,
       });
     }
 
@@ -114,6 +169,22 @@
     const member = assignment ? company.find((p) => p.id === assignment.playerId) : undefined;
     return { role, assignment, member };
   });
+  $: keepWatchAssignment = currentAssignments.find((a) => a.role === "Keep Watch");
+  $: keepWatchMember = keepWatchAssignment
+    ? company.find((member) => member.id === keepWatchAssignment.playerId)
+    : undefined;
+  $: quartermasterMember = $expedition.wilderness.quartermasterTodayId
+    ? company.find((member) => member.id === $expedition.wilderness.quartermasterTodayId)
+    : undefined;
+  $: quartermasterBenefitActiveSoFar =
+    !!$expedition.wilderness.quartermasterTodayId &&
+    !$expedition.wilderness.quartermasterMissedToday &&
+    $expedition.wilderness.quartermasterCoveredTravelQuarters === $expedition.wilderness.travelQuartersToday &&
+    $expedition.wilderness.travelQuartersToday > 0;
+  $: makeCampEntries = assignedCompany.filter(({ assignment }) => assignment.activity === "Make Camp");
+  $: effectiveMakeCampLeaderId =
+    $expedition.wilderness.makeCampLeaderId ||
+    (makeCampEntries.length === 1 ? makeCampEntries[0].member.id : "");
   $: activityCards = ACTIVITIES.map((activity) => ({
     activity,
     members: assignedCompany.filter(({ assignment }) => assignment.activity === activity),
@@ -240,10 +311,10 @@
   function weatherDisadvantages(kind: ExpeditionRollKind): boolean {
     const effect = $expedition.wilderness.weatherEffect;
     if (effect === "heavy") {
-      return ["Trailblaze", "Forage for Food", "Forage for Water", "Hunt", "Fish", "Make Camp"].includes(kind);
+      return ["Trailblaze", "Keep Watch", "Forage for Food", "Forage for Water", "Hunt", "Fish", "Make Camp"].includes(kind);
     }
     if (effect === "severe") {
-      return kind === "Trailblaze" || kind === "Make Camp";
+      return kind === "Trailblaze" || kind === "Keep Watch" || kind === "Make Camp";
     }
     if (effect === "cold-snap" || effect === "heat-wave") {
       return kind === "Forage for Food" || kind === "Forage for Water" || kind === "Hunt";
@@ -396,6 +467,154 @@
     patchWilderness({ terrain: (e.currentTarget as HTMLSelectElement).value as TravelTerrain });
   }
 
+  function memberForId(id: string): CompanyMember | undefined {
+    return company.find((member) => member.id === id);
+  }
+
+  function scoutAttributes(level: number): CompanyNpc["attributes"] {
+    if (level <= 2) return { STR: 10, DEX: 12, INT: 11, WIL: 10 };
+    if (level <= 4) return { STR: 10, DEX: 13, INT: 12, WIL: 10 };
+    if (level <= 7) return { STR: 10, DEX: 14, INT: 13, WIL: 10 };
+    return { STR: 10, DEX: 15, INT: 14, WIL: 10 };
+  }
+
+  function roleEligible(member: CompanyMember, role: WildernessRole): boolean {
+    if (member.source === "player") {
+      if (role === "Quartermaster") return member.presence?.quartermasterQualified === true;
+      return true;
+    }
+
+    const npc = member.npc;
+    if (!npc) return false;
+    if (role === "Trailblazer") {
+      return npc.kind === "Guide Hireling" || npc.kind === "Scout Henchman" || npc.kind === "Apprentice";
+    }
+    if (role === "Keep Watch") {
+      return npc.kind === "Scout Henchman" || npc.kind === "Apprentice";
+    }
+    return npc.kind === "Professional Quartermaster" || npc.quartermasterQualified;
+  }
+
+  function makeCampLeadEligible(member: CompanyMember): boolean {
+    if (member.source === "player") return true;
+    const npc = member.npc;
+    if (!npc) return false;
+    return (
+      npc.kind === "Camp Hand Hireling" ||
+      npc.kind === "Scout Henchman" ||
+      npc.kind === "Apprentice" ||
+      npc.wildernessCraftRank > 0
+    );
+  }
+
+  function npcPracticedExpertise(npc: CompanyNpc, kind: ExpeditionRollKind): boolean {
+    if (npc.kind === "Guide Hireling") return kind === "Trailblaze";
+    if (npc.kind === "Camp Hand Hireling") return kind === "Make Camp";
+    if (npc.kind === "Scout Henchman") {
+      return [
+        "Trailblaze",
+        "Keep Watch",
+        "Make Camp",
+        "Forage for Food",
+        "Forage for Water",
+        "Hunt",
+        "Fish",
+      ].includes(kind);
+    }
+    return false;
+  }
+
+  function npcRank(npc: CompanyNpc, skill: ExpeditionSkill | undefined): number {
+    if (skill === "Wilderness Craft") return npc.wildernessCraftRank;
+    if (skill === "Detection") return npc.detectionRank;
+    return 0;
+  }
+
+  async function addNpc() {
+    if (!$isGM || !npcName.trim()) return;
+    const level = Math.max(1, Math.min(10, npcLevel || 1));
+    const npc: CompanyNpc = {
+      id: `npc:${newId()}`,
+      name: npcName.trim(),
+      kind: npcKind,
+      level,
+      attributes: npcKind === "Scout Henchman" ? scoutAttributes(level) : { STR: 10, DEX: 10, INT: 10, WIL: 10 },
+      wildernessCraftRank: 0,
+      detectionRank: 0,
+      quartermasterQualified: npcKind === "Professional Quartermaster",
+      fatigue: 0,
+      notes: npcNotes.trim(),
+    };
+    await patchWilderness({ companyNpcs: [...$expedition.wilderness.companyNpcs, npc] });
+    npcName = "";
+    npcKind = "Guide Hireling";
+    npcLevel = 1;
+    npcNotes = "";
+  }
+
+  async function patchNpc(id: string, patch: Partial<CompanyNpc>) {
+    if (!$isGM) return;
+    await patchWilderness({
+      companyNpcs: $expedition.wilderness.companyNpcs.map((npc) =>
+        npc.id === id ? { ...npc, ...patch } : npc,
+      ),
+    });
+  }
+
+  async function removeNpc(id: string) {
+    if (!$isGM) return;
+    clearQuarterPlan();
+    await patchWilderness({
+      companyNpcs: $expedition.wilderness.companyNpcs.filter((npc) => npc.id !== id),
+      assignments: $expedition.wilderness.assignments.filter((assignment) => assignment.playerId !== id),
+      makeCampLeaderId: $expedition.wilderness.makeCampLeaderId === id ? "" : $expedition.wilderness.makeCampLeaderId,
+      quartermasterTodayId:
+        $expedition.wilderness.quartermasterTodayId === id ? "" : $expedition.wilderness.quartermasterTodayId,
+      forcedMarchStoppedPlayerIds: $expedition.wilderness.forcedMarchStoppedPlayerIds.filter(
+        (memberId) => memberId !== id,
+      ),
+    });
+  }
+
+  async function onNpcLevelChange(npc: CompanyNpc, e: Event) {
+    const level = Math.max(1, Math.min(10, parseInt((e.currentTarget as HTMLInputElement).value, 10) || 1));
+    await patchNpc(npc.id, {
+      level,
+      attributes: npc.kind === "Scout Henchman" ? scoutAttributes(level) : npc.attributes,
+    });
+  }
+
+  async function onNpcAttributeChange(
+    npc: CompanyNpc,
+    attribute: "STR" | "DEX" | "INT" | "WIL",
+    e: Event,
+  ) {
+    const value = Math.max(1, Math.min(20, parseInt((e.currentTarget as HTMLInputElement).value, 10) || 10));
+    await patchNpc(npc.id, { attributes: { ...npc.attributes, [attribute]: value } });
+  }
+
+  async function onNpcRankChange(
+    npc: CompanyNpc,
+    skill: "Wilderness Craft" | "Detection",
+    e: Event,
+  ) {
+    const value = Math.max(0, Math.min(4, parseInt((e.currentTarget as HTMLSelectElement).value, 10) || 0));
+    if (skill === "Wilderness Craft") await patchNpc(npc.id, { wildernessCraftRank: value });
+    else await patchNpc(npc.id, { detectionRank: value });
+  }
+
+  async function onNpcQuartermasterChange(npc: CompanyNpc, e: Event) {
+    await patchNpc(npc.id, { quartermasterQualified: (e.currentTarget as HTMLInputElement).checked });
+  }
+
+  function onNewNpcKindChange(e: Event) {
+    npcKind = (e.currentTarget as HTMLSelectElement).value as CompanyNpcKind;
+  }
+
+  function onNewNpcLevelChange(e: Event) {
+    npcLevel = Math.max(1, Math.min(10, parseInt((e.currentTarget as HTMLInputElement).value, 10) || 1));
+  }
+
   function assignmentFor(playerId: string): ExpeditionAssignment {
     return (
       currentAssignments.find((a) => a.playerId === playerId) ?? {
@@ -409,11 +628,6 @@
     return ["Forage for Food", "Forage for Water", "Hunt", "Fish"].includes(activity);
   }
 
-  async function saveAssignment(nextAssignment: ExpeditionAssignment) {
-    const others = $expedition.wilderness.assignments.filter((a) => a.playerId !== nextAssignment.playerId);
-    await patchWilderness({ assignments: [...others, nextAssignment] });
-  }
-
   async function onActivityChange(playerId: string, e: Event) {
     if (!$isGM) return;
     clearQuarterPlan();
@@ -421,17 +635,23 @@
     const current = assignmentFor(playerId);
     let role = current.role;
 
-    // Trailblazer and Keep Watch are Travel Roles: the character remains Traveling.
     if ((role === "Trailblazer" || role === "Keep Watch") && activity !== "Travel") {
       role = undefined;
     }
-
-    // Quartermaster may Travel or assist Make Camp, but cannot Forage, Hunt, or Fish.
     if (role === "Quartermaster" && incompatibleWithQuartermaster(activity)) {
       role = undefined;
     }
 
-    await saveAssignment({ playerId, activity, role });
+    const others = $expedition.wilderness.assignments.filter((a) => a.playerId !== playerId);
+    const makeCampLeaderId =
+      activity !== "Make Camp" && $expedition.wilderness.makeCampLeaderId === playerId
+        ? ""
+        : $expedition.wilderness.makeCampLeaderId;
+
+    await patchWilderness({
+      assignments: [...others, { playerId, activity, role }],
+      makeCampLeaderId,
+    });
   }
 
   async function onRoleChange(playerId: string, e: Event) {
@@ -439,6 +659,12 @@
     clearQuarterPlan();
     const raw = (e.currentTarget as HTMLSelectElement).value;
     const role = raw ? (raw as WildernessRole) : undefined;
+    const member = memberForId(playerId);
+    if (role && (!member || !roleEligible(member, role))) {
+      quarterMessage = `${member?.name ?? "This member"} is not eligible for ${role} under the current follower/character rules.`;
+      return;
+    }
+
     const current = assignmentFor(playerId);
     let activity = current.activity;
 
@@ -448,7 +674,6 @@
       activity = "Travel";
     }
 
-    // Each Travel Role accepts one character. Assigning it here clears it from anyone else.
     let assignments = $expedition.wilderness.assignments
       .filter((a) => a.playerId !== playerId)
       .map((a) => (role && a.role === role ? { ...a, role: undefined } : a));
@@ -457,10 +682,22 @@
     await patchWilderness({ assignments });
   }
 
+  async function setMakeCampLeader(playerId: string) {
+    if (!$isGM) return;
+    const member = memberForId(playerId);
+    if (!member || !makeCampLeadEligible(member)) {
+      quarterMessage = `${member?.name ?? "This member"} cannot lead Make Camp with their current Job/Type.`;
+      return;
+    }
+    await patchWilderness({ makeCampLeaderId: playerId });
+  }
+
   async function resetAssignments() {
     if (!$isGM) return;
     clearQuarterPlan();
-    await patchWilderness({ assignments: [] });
+    watchTask = null;
+    watchMessage = "";
+    await patchWilderness({ assignments: [], makeCampLeaderId: "" });
   }
 
   function makeTask(
@@ -469,7 +706,8 @@
     attributeMode: ExpeditionAttributeMode,
     options: {
       baseModifier?: number;
-      useWildernessCraft?: boolean;
+      skill?: ExpeditionSkill;
+      untrainedDisadvantage?: boolean;
       hasAdvantage?: boolean;
       hasDisadvantage?: boolean;
       applyFailureFatigue?: boolean;
@@ -483,7 +721,8 @@
       playerName: member.name,
       attributeMode,
       baseModifier: options.baseModifier ?? 0,
-      useWildernessCraft: options.useWildernessCraft ?? true,
+      skill: options.skill,
+      untrainedDisadvantage: options.untrainedDisadvantage ?? false,
       hasAdvantage: options.hasAdvantage ?? false,
       hasDisadvantage: options.hasDisadvantage ?? false,
       applyFailureFatigue: options.applyFailureFatigue ?? false,
@@ -500,8 +739,19 @@
     if (!company.length) {
       quarterPlanActive = false;
       quarterTasks = [];
-      quarterMessage = "No connected player characters are available to resolve this Quarter.";
+      quarterMessage = "No Company members are available to resolve this Quarter.";
       return;
+    }
+
+    const quartermasterAssignment = currentAssignments.find((assignment) => assignment.role === "Quartermaster");
+    if (quartermasterAssignment) {
+      const qm = memberForId(quartermasterAssignment.playerId);
+      if (!qm || !roleEligible(qm, "Quartermaster")) {
+        quarterPlanActive = false;
+        quarterTasks = [];
+        quarterMessage = "The assigned Quartermaster is not currently eligible for the role.";
+        return;
+      }
     }
 
     if (travelingThisQuarter) {
@@ -538,12 +788,10 @@
         return;
       }
 
-      // The third and fourth traveling Quarters are Forced Marches.
       if ($expedition.wilderness.travelQuartersToday >= 2) {
         for (const entry of assignedCompany.filter(({ assignment }) => assignment.activity === "Travel")) {
           tasks.push(
             makeTask("Forced March", entry.member, "STR", {
-              useWildernessCraft: false,
               hasDisadvantage: true,
               applyFailureFatigue: true,
               note:
@@ -555,11 +803,17 @@
 
       if ($expedition.wilderness.routeMode === "Unmapped Country") {
         const trailAssignment = currentAssignments.find((a) => a.role === "Trailblazer");
-        const trailMember = trailAssignment ? company.find((p) => p.id === trailAssignment.playerId) : undefined;
+        const trailMember = trailAssignment ? memberForId(trailAssignment.playerId) : undefined;
         if (!trailAssignment || !trailMember) {
           quarterPlanActive = false;
           quarterTasks = [];
-          quarterMessage = "Unmapped travel requires a connected Trailblazer before this Quarter can resolve.";
+          quarterMessage = "Unmapped travel requires a Trailblazer before this Quarter can resolve.";
+          return;
+        }
+        if (!roleEligible(trailMember, "Trailblazer")) {
+          quarterPlanActive = false;
+          quarterTasks = [];
+          quarterMessage = `${trailMember.name} is not eligible to serve as Trailblazer.`;
           return;
         }
 
@@ -569,7 +823,8 @@
         tasks.push(
           makeTask("Trailblaze", trailMember, "INT", {
             baseModifier: terrainPressure(),
-            useWildernessCraft: true,
+            skill: "Wilderness Craft",
+            untrainedDisadvantage: true,
             hasAdvantage: cautiousAdvantage,
             hasDisadvantage: weatherDisadvantage,
             note:
@@ -605,6 +860,8 @@
         }
         tasks.push(
           makeTask(kind, entry.member, attributeMode, {
+            skill: "Wilderness Craft",
+            untrainedDisadvantage: true,
             hasDisadvantage: weatherDisadvantages(kind),
             note: weatherDisadvantages(kind)
               ? `${$expedition.wilderness.weather}: this Activity is at Disadvantage.`
@@ -615,26 +872,48 @@
     }
 
     const campMembers = assignedCompany.filter(({ assignment }) => assignment.activity === "Make Camp");
-    if (campMembers.length > 1) {
-      quarterPlanActive = false;
-      quarterTasks = [];
-      quarterMessage =
-        "More than one character is assigned Make Camp. The rules require one leader and helpers; leave only the leader on Make Camp for this pass.";
-      return;
-    }
-    if (campMembers.length === 1) {
+    if (campMembers.length) {
+      const leaderId =
+        $expedition.wilderness.makeCampLeaderId ||
+        (campMembers.length === 1 ? campMembers[0].member.id : "");
+      const leader = campMembers.find(({ member }) => member.id === leaderId);
+
+      if (!leader) {
+        quarterPlanActive = false;
+        quarterTasks = [];
+        quarterMessage = "Choose one of the Make Camp participants as the camp leader; the others will help.";
+        return;
+      }
+      if (!makeCampLeadEligible(leader.member)) {
+        quarterPlanActive = false;
+        quarterTasks = [];
+        quarterMessage = `${leader.member.name} cannot lead Make Camp with their current Job/Type.`;
+        return;
+      }
+
+      const helperCount = Math.min(3, campMembers.length - 1);
+      const helperModifier = -helperCount;
       const severeNote =
         $expedition.wilderness.weatherEffect === "severe"
           ? " Severe storm conditions may make adequate camping impossible without suitable gear, capability, shelter, or established fiction."
           : "";
+      const capacityNote =
+        company.length > 6
+          ? ` A normal successful camp supports six travelers; this Company currently has ${company.length}.`
+          : "";
+
       tasks.push(
-        makeTask("Make Camp", campMembers[0].member, "INT_OR_STR", {
-          baseModifier: terrainPressure(),
+        makeTask("Make Camp", leader.member, "INT_OR_STR", {
+          baseModifier: terrainPressure() + helperModifier,
+          skill: "Wilderness Craft",
+          untrainedDisadvantage: true,
           hasDisadvantage: weatherDisadvantages("Make Camp"),
           note:
             `Terrain: ${$expedition.wilderness.terrain} ${terrainPressure() ? `+${terrainPressure()}` : "+0"}.` +
+            `${helperCount ? ` ${helperCount} helper${helperCount === 1 ? "" : "s"}: ${helperModifier}.` : ""}` +
             `${weatherDisadvantages("Make Camp") ? ` ${$expedition.wilderness.weather} imposes Disadvantage.` : ""}` +
-            severeNote,
+            severeNote +
+            capacityNote,
         }),
       );
     }
@@ -646,40 +925,126 @@
       : "No Save is required for the declared Activities. The Quarter is ready to complete.";
   }
 
-  async function requestTaskRoll(task: QuarterTask) {
-    if (!$isGM || task.status === "waiting") return;
-    task.status = "waiting";
-    quarterTasks = [...quarterTasks];
+  function setTaskState(task: QuarterTask, watch = false) {
+    if (watch) watchTask = { ...task };
+    else quarterTasks = [...quarterTasks];
+  }
 
-    const response = await requestExpeditionRoll({
-      targetPlayerId: task.playerId,
+  async function resolveNpcTask(
+    task: QuarterTask,
+    member: CompanyMember,
+    choice?: "INT" | "STR",
+  ): Promise<ExpeditionRollResponse | null> {
+    const npc = member.npc;
+    if (!npc) return null;
+    if (task.attributeMode === "INT_OR_STR" && !choice) return null;
+
+    let attribute: "STR" | "DEX" | "INT" | "WIL";
+    if (task.attributeMode === "INT") attribute = "INT";
+    else if (task.attributeMode === "STR") attribute = "STR";
+    else if (task.attributeMode === "HIGHER_INT_DEX") {
+      attribute = npc.attributes.INT >= npc.attributes.DEX ? "INT" : "DEX";
+    } else {
+      attribute = choice ?? "INT";
+    }
+
+    const rank = npcRank(npc, task.skill);
+    const practiced = rank === 0 && npcPracticedExpertise(npc, task.kind);
+    const modifier = task.baseModifier - rank * 2 - (practiced ? 1 : 0);
+    const mode = expeditionRollMode(
+      task.hasAdvantage,
+      task.hasDisadvantage,
+      task.untrainedDisadvantage && !!task.skill && rank === 0 && !practiced,
+    );
+    const roll = await rollReforgedSave(npc.attributes[attribute], modifier, mode, "everyone");
+    const outcome = await resolveExpeditionOutcome(task.kind, roll);
+
+    let fatigueApplied = false;
+    if (task.applyFailureFatigue && !roll.success) {
+      await patchNpc(npc.id, { fatigue: npc.fatigue + 1 });
+      fatigueApplied = true;
+    }
+
+    return {
+      requestId: `npc:${task.id}:${Date.now()}`,
+      targetPlayerId: npc.id,
       kind: task.kind,
-      attributeMode: task.attributeMode,
-      baseModifier: task.baseModifier,
-      useWildernessCraft: task.useWildernessCraft,
-      hasAdvantage: task.hasAdvantage,
-      hasDisadvantage: task.hasDisadvantage,
-      applyFailureFatigue: task.applyFailureFatigue,
-      note: task.note,
-    });
+      status: "rolled",
+      playerName: "GM",
+      characterName: npc.name,
+      attribute,
+      target: npc.attributes[attribute],
+      skill: task.skill,
+      skillRank: task.skill ? rank : undefined,
+      modifier,
+      mode,
+      roll,
+      outcome: outcome.text,
+      boonBane: outcome.boonBane,
+      fatigueApplied,
+    };
+  }
 
-    const current = quarterTasks.find((t) => t.id === task.id);
-    if (!current) return;
+  async function resolveTask(
+    task: QuarterTask,
+    choice?: "INT" | "STR",
+    watch = false,
+  ) {
+    if (!$isGM || task.status === "waiting") return;
+    const member = memberForId(task.playerId);
+    if (!member) {
+      if (watch) watchMessage = `${task.playerName} is no longer present.`;
+      else quarterMessage = `${task.playerName} is no longer present.`;
+      return;
+    }
+
+    task.status = "waiting";
+    setTaskState(task, watch);
+
+    const response =
+      member.source === "npc"
+        ? await resolveNpcTask(task, member, choice)
+        : await requestExpeditionRoll({
+            targetPlayerId: task.playerId,
+            kind: task.kind,
+            attributeMode: task.attributeMode,
+            baseModifier: task.baseModifier,
+            skill: task.skill,
+            untrainedDisadvantage: task.untrainedDisadvantage,
+            hasAdvantage: task.hasAdvantage,
+            hasDisadvantage: task.hasDisadvantage,
+            applyFailureFatigue: task.applyFailureFatigue,
+            note: task.note,
+          });
+
     if (!response) {
-      current.status = "ready";
-      quarterTasks = [...quarterTasks];
-      quarterMessage = `${task.playerName} did not answer the ${task.kind} request. You can request it again.`;
+      task.status = "ready";
+      setTaskState(task, watch);
+      const message =
+        member.source === "npc"
+          ? `Choose the Attribute for ${task.playerName}'s ${task.kind} roll.`
+          : `${task.playerName} did not answer the ${task.kind} request. You can request it again.`;
+      if (watch) watchMessage = message;
+      else quarterMessage = message;
       return;
     }
+
     if (response.status === "declined") {
-      current.status = "ready";
-      quarterTasks = [...quarterTasks];
-      quarterMessage = `${task.playerName} declined the ${task.kind} request.`;
+      task.status = "ready";
+      setTaskState(task, watch);
+      const message = `${task.playerName} declined the ${task.kind} request.`;
+      if (watch) watchMessage = message;
+      else quarterMessage = message;
       return;
     }
-    current.status = "done";
-    current.response = response;
-    quarterTasks = [...quarterTasks];
+
+    task.status = "done";
+    task.response = response;
+    setTaskState(task, watch);
+
+    if (watch) {
+      watchMessage = response.outcome ?? "";
+    }
 
     if (response.kind === "Forced March" && response.roll?.success === false) {
       await patchWilderness({
@@ -688,6 +1053,36 @@
         ],
       });
     }
+  }
+
+  async function triggerKeepWatch() {
+    if (!$isGM) return;
+    watchTask = null;
+    watchMessage = "";
+
+    if (!keepWatchMember) {
+      watchMessage = "No one is on Watch. If this trigger would surprise the Company, the Company is surprised automatically.";
+      return;
+    }
+    if (!roleEligible(keepWatchMember, "Keep Watch")) {
+      watchMessage = `${keepWatchMember.name} is not eligible to serve as Keep Watch.`;
+      return;
+    }
+
+    const cautiousAdvantage = $expedition.wilderness.pace === "Cautious";
+    const weatherDisadvantage = weatherDisadvantages("Keep Watch");
+    const task = makeTask("Keep Watch", keepWatchMember, "INT", {
+      skill: "Detection",
+      untrainedDisadvantage: true,
+      hasAdvantage: cautiousAdvantage,
+      hasDisadvantage: weatherDisadvantage,
+      note:
+        `${cautiousAdvantage ? "Cautious Pace grants Advantage. " : ""}` +
+        `${weatherDisadvantage ? `${$expedition.wilderness.weather} imposes Disadvantage. ` : ""}` +
+        "Roll only when something would otherwise surprise the Company.",
+    });
+    watchTask = task;
+    await resolveTask(task, undefined, true);
   }
 
   async function completeQuarter() {
@@ -705,6 +1100,22 @@
     }
     if (progressMade) progress += 1;
 
+    let quartermasterTodayId = $expedition.wilderness.quartermasterTodayId;
+    let quartermasterCoveredTravelQuarters = $expedition.wilderness.quartermasterCoveredTravelQuarters;
+    let quartermasterMissedToday = $expedition.wilderness.quartermasterMissedToday;
+
+    if (travelingThisQuarter) {
+      const assignment = currentAssignments.find((entry) => entry.role === "Quartermaster");
+      const member = assignment ? memberForId(assignment.playerId) : undefined;
+      if (assignment && member && roleEligible(member, "Quartermaster")) {
+        if (!quartermasterTodayId) quartermasterTodayId = assignment.playerId;
+        if (quartermasterTodayId === assignment.playerId) quartermasterCoveredTravelQuarters += 1;
+        else quartermasterMissedToday = true;
+      } else {
+        quartermasterMissedToday = true;
+      }
+    }
+
     const weatherDelay = travelingThisQuarter ? weatherTravelDelay() : 0;
     const clockCost = 1 + weatherDelay;
     const next = advanceClock($expedition.wilderness.quarter, clockCost);
@@ -718,11 +1129,17 @@
       day: nextDay,
       travelQuartersToday: next.daysAdvanced ? 0 : travelCount,
       forcedMarchStoppedPlayerIds: next.daysAdvanced ? [] : $expedition.wilderness.forcedMarchStoppedPlayerIds,
+      quartermasterTodayId: next.daysAdvanced ? "" : quartermasterTodayId,
+      quartermasterCoveredTravelQuarters: next.daysAdvanced ? 0 : quartermasterCoveredTravelQuarters,
+      quartermasterMissedToday: next.daysAdvanced ? false : quartermasterMissedToday,
+      makeCampLeaderId: "",
       assignments: [],
     });
 
     quarterTasks = [];
     quarterPlanActive = false;
+    watchTask = null;
+    watchMessage = "";
     quarterMessage =
       `${completedLabel} resolved. ` +
       `${progressMade ? "Travel progress +1. " : travelingThisQuarter ? "No travel progress. " : "Company did not travel. "}` +
@@ -1001,12 +1418,76 @@
                     <div class="flex items-center gap-1 mt-1 text-xs">
                       <i class="material-icons text-sm">person</i>
                       <span class="truncate">{card.member?.name ?? "Disconnected character"}</span>
+                      {#if card.member?.source === "npc"}
+                        <span class="role-chip">NPC</span>
+                      {/if}
                     </div>
+                    {#if card.member?.npc}
+                      <div class="text-[9px] text-gray-500 mt-0.5">{card.member.npc.kind}</div>
+                    {/if}
                   {:else}
                     <div class="text-[10px] text-gray-400 mt-1">Unassigned</div>
                   {/if}
                 </div>
               {/each}
+            </div>
+
+            <div class="mt-1 grid grid-cols-1 md:grid-cols-2 gap-1">
+              <div class="border rounded-md p-2 bg-white text-[10px]">
+                <div class="flex items-center gap-2">
+                  <span class="font-bold">Keep Watch Trigger</span>
+                  {#if $isGM}
+                    <button
+                      class="ml-auto border rounded px-2 py-1"
+                      on:click={triggerKeepWatch}
+                    >
+                      Trigger Keep Watch
+                    </button>
+                  {/if}
+                </div>
+                <div class="text-gray-500 mt-0.5">
+                  Roll only when something would otherwise surprise the Company.
+                </div>
+                {#if watchTask}
+                  <div class="mt-1">
+                    {watchTask.playerName}: {watchTask.status}
+                    {#if watchTask.response?.roll}
+                      — d20 {watchTask.response.roll.natural} → {watchTask.response.roll.total}
+                      <span class:font-bold={watchTask.response.roll.success}>
+                        {watchTask.response.roll.success ? " SUCCESS" : " FAILURE"}
+                      </span>
+                    {/if}
+                  </div>
+                {/if}
+                {#if watchMessage}
+                  <div class="mt-1">{watchMessage}</div>
+                {/if}
+              </div>
+
+              <div class="border rounded-md p-2 bg-white text-[10px]">
+                <div class="font-bold">Quartermaster Coverage</div>
+                {#if quartermasterMember}
+                  <div class="mt-0.5">
+                    {quartermasterMember.name} · {$expedition.wilderness.quartermasterCoveredTravelQuarters}
+                    / {$expedition.wilderness.travelQuartersToday} completed travel Quarters
+                  </div>
+                  <div
+                    class="mt-0.5"
+                    class:text-green-700={quartermasterBenefitActiveSoFar}
+                    class:text-red-700={$expedition.wilderness.quartermasterMissedToday}
+                  >
+                    {quartermasterBenefitActiveSoFar
+                      ? "Active so far: ordinary daily Ration/Water Usage will step on 1–2."
+                      : $expedition.wilderness.quartermasterMissedToday
+                        ? "Daily Quartermaster benefit has been missed."
+                        : "Coverage is being established."}
+                  </div>
+                {:else}
+                  <div class="text-gray-500 mt-0.5">
+                    No completed travel Quarter has established Quartermaster coverage today.
+                  </div>
+                {/if}
+              </div>
             </div>
           </div>
 
@@ -1081,7 +1562,9 @@
                     {#if task.response?.roll}
                       <div class="mt-1">
                         {task.response.characterName}: {task.response.attribute} {task.response.target},
-                        {#if task.response.skillRank !== undefined}WC R{task.response.skillRank}, {/if}
+                        {#if task.response.skillRank !== undefined && task.response.skill}
+                          {task.response.skill} R{task.response.skillRank},
+                        {/if}
                         modifier {task.response.modifier >= 0 ? "+" : ""}{task.response.modifier},
                         {task.response.mode}.
                         <span class:font-bold={task.response.roll.success}>
@@ -1093,13 +1576,38 @@
                         <div class="text-[10px] mt-0.5">{task.response.outcome}</div>
                       {/if}
                     {:else}
-                      <button
-                        class="mt-1 border rounded-md px-2 py-1"
-                        disabled={task.status === "waiting"}
-                        on:click={() => requestTaskRoll(task)}
-                      >
-                        {task.status === "waiting" ? "Waiting for player…" : "Request Roll"}
-                      </button>
+                      {#if memberForId(task.playerId)?.source === "npc" && task.attributeMode === "INT_OR_STR"}
+                        <div class="flex gap-1 mt-1">
+                          <button
+                            class="border rounded-md px-2 py-1"
+                            disabled={task.status === "waiting"}
+                            on:click={() => resolveTask(task, "INT")}
+                          >
+                            Roll NPC INT
+                          </button>
+                          <button
+                            class="border rounded-md px-2 py-1"
+                            disabled={task.status === "waiting"}
+                            on:click={() => resolveTask(task, "STR")}
+                          >
+                            Roll NPC STR
+                          </button>
+                        </div>
+                      {:else}
+                        <button
+                          class="mt-1 border rounded-md px-2 py-1"
+                          disabled={task.status === "waiting"}
+                          on:click={() => resolveTask(task)}
+                        >
+                          {task.status === "waiting"
+                            ? memberForId(task.playerId)?.source === "npc"
+                              ? "Rolling NPC…"
+                              : "Waiting for player…"
+                            : memberForId(task.playerId)?.source === "npc"
+                              ? "Roll NPC"
+                              : "Request Roll"}
+                        </button>
+                      {/if}
                     {/if}
                   </div>
                 {/each}
@@ -1166,8 +1674,8 @@
             {#if $LastExpeditionRollStore.mode && $LastExpeditionRollStore.status === "rolled"}
               <div class="text-[10px] text-gray-500 mt-0.5">
                 {$LastExpeditionRollStore.mode}
-                {#if $LastExpeditionRollStore.skillRank !== undefined}
-                  · Wilderness Craft R{$LastExpeditionRollStore.skillRank}
+                {#if $LastExpeditionRollStore.skillRank !== undefined && $LastExpeditionRollStore.skill}
+                  · {$LastExpeditionRollStore.skill} R{$LastExpeditionRollStore.skillRank}
                 {/if}
               </div>
             {/if}
@@ -1212,21 +1720,43 @@
 
         <h2>COMPANY ASSIGNMENTS</h2>
         <div class="text-[10px] text-gray-500 mb-1">
-          Choose each character's Quarter Activity and optional Travel Role. Everyone defaults to Travel.
+          Choose each member's Quarter Activity and optional Travel Role. Everyone defaults to Travel.
         </div>
         <div class="text-[9px] text-gray-400 mb-2">
           Owlbear party: {$PartyStore.filter((p) => p.role === "PLAYER").length}
           · Reforged clients: {$ReforgedPresenceStore.filter((p) => p.role === "PLAYER" && p.id !== $CurrentPlayerId).length}
+          · NPCs: {$expedition.wilderness.companyNpcs.length}
         </div>
+
         {#if company.length}
           <div class="flex flex-col gap-2">
-            {#each company as p}
+            {#each company as p (p.id)}
               {@const assignment = assignmentFor(p.id)}
               <div class="border rounded-md p-2 text-xs">
                 <div class="font-bold flex items-center gap-1 mb-1">
-                  <i class="material-icons text-sm">person</i>
+                  <i class="material-icons text-sm">{p.source === "npc" ? "badge" : "person"}</i>
                   <span class="truncate">{p.name}</span>
+                  {#if p.npc}
+                    <span class="role-chip">{p.npc.kind}</span>
+                    {#if p.npc.fatigue}
+                      <span class="text-[9px] text-red-700">Fatigue {p.npc.fatigue}</span>
+                    {/if}
+                    {#if $isGM}
+                      <button
+                        class="ml-auto border rounded px-1 text-[10px]"
+                        title="Remove Company NPC"
+                        on:click={() => removeNpc(p.id)}
+                      >
+                        ×
+                      </button>
+                    {/if}
+                  {/if}
                 </div>
+
+                {#if p.npc?.notes}
+                  <div class="text-[9px] text-gray-500 mb-1">{p.npc.notes}</div>
+                {/if}
+
                 <label class="block">
                   Activity
                   <select disabled={!$isGM} value={assignment.activity} on:change={(e) => onActivityChange(p.id, e)}>
@@ -1235,20 +1765,159 @@
                     {/each}
                   </select>
                 </label>
+
                 <label class="block mt-1">
                   Travel Role
                   <select disabled={!$isGM} value={assignment.role ?? ""} on:change={(e) => onRoleChange(p.id, e)}>
                     <option value="">None</option>
                     {#each ROLES as role}
-                      <option value={role}>{role}</option>
+                      <option value={role} disabled={!roleEligible(p, role)}>{role}</option>
                     {/each}
                   </select>
                 </label>
+
+                {#if assignment.activity === "Make Camp"}
+                  <div class="mt-1 flex items-center gap-1 text-[10px]">
+                    {#if p.id === effectiveMakeCampLeaderId}
+                      <span class="role-chip">Camp Leader</span>
+                    {/if}
+                    {#if $isGM}
+                      <button
+                        class="border rounded px-2 py-1"
+                        disabled={!makeCampLeadEligible(p)}
+                        on:click={() => setMakeCampLeader(p.id)}
+                      >
+                        {p.id === effectiveMakeCampLeaderId ? "Leading Make Camp" : "Set as Camp Leader"}
+                      </button>
+                    {/if}
+                  </div>
+                {/if}
+
+                {#if p.npc && $isGM}
+                  <details class="mt-1">
+                    <summary class="text-[10px] cursor-pointer">NPC details</summary>
+
+                    {#if p.npc.kind === "Scout Henchman"}
+                      <label class="block mt-1">
+                        Level
+                        <input
+                          class="w-14"
+                          type="number"
+                          min="1"
+                          max="10"
+                          value={p.npc.level}
+                          on:change={(e) => onNpcLevelChange(p.npc, e)}
+                        />
+                      </label>
+                    {/if}
+
+                    {#if p.npc.kind === "Apprentice" || p.npc.kind === "Other"}
+                      <div class="grid grid-cols-4 gap-1 mt-1">
+                        {#each ["STR", "DEX", "INT", "WIL"] as attr}
+                          <label class="text-[9px]">
+                            {attr}
+                            <input
+                              type="number"
+                              min="1"
+                              max="20"
+                              value={p.npc.attributes[attr]}
+                              on:change={(e) => onNpcAttributeChange(p.npc, attr, e)}
+                            />
+                          </label>
+                        {/each}
+                      </div>
+                      <div class="grid grid-cols-2 gap-1 mt-1">
+                        <label class="text-[9px]">
+                          Wilderness Craft
+                          <select
+                            value={p.npc.wildernessCraftRank}
+                            on:change={(e) => onNpcRankChange(p.npc, "Wilderness Craft", e)}
+                          >
+                            {#each RANKS as rank}<option value={rank}>R{rank}</option>{/each}
+                          </select>
+                        </label>
+                        <label class="text-[9px]">
+                          Detection
+                          <select
+                            value={p.npc.detectionRank}
+                            on:change={(e) => onNpcRankChange(p.npc, "Detection", e)}
+                          >
+                            {#each RANKS as rank}<option value={rank}>R{rank}</option>{/each}
+                          </select>
+                        </label>
+                      </div>
+                      <label class="flex items-center gap-1 mt-1 text-[9px]">
+                        <input
+                          type="checkbox"
+                          checked={p.npc.quartermasterQualified}
+                          on:change={(e) => onNpcQuartermasterChange(p.npc, e)}
+                        />
+                        Quartermaster-qualified
+                      </label>
+                    {:else}
+                      <div class="text-[9px] text-gray-500 mt-1">
+                        STR {p.npc.attributes.STR} · DEX {p.npc.attributes.DEX} · INT {p.npc.attributes.INT} · WIL {p.npc.attributes.WIL}
+                        {#if p.npc.kind === "Guide Hireling"} · Trailblaze Practiced Expertise{/if}
+                        {#if p.npc.kind === "Camp Hand Hireling"} · Make Camp Practiced Expertise{/if}
+                        {#if p.npc.kind === "Scout Henchman"} · Scout Practiced Expertise{/if}
+                        {#if p.npc.kind === "Professional Quartermaster"} · Quartermaster specialist{/if}
+                      </div>
+                    {/if}
+                  </details>
+                {/if}
               </div>
             {/each}
           </div>
         {:else}
-          <div class="text-xs text-gray-400">No player characters currently connected.</div>
+          <div class="text-xs text-gray-400">No Company members currently available.</div>
+        {/if}
+
+        {#if $isGM}
+          <div class="border-t mt-3 pt-2">
+            <div class="font-bold text-xs">Add Company NPC</div>
+            <div class="text-[9px] text-gray-500 mb-1">
+              Expedition NPCs are shared room state. Their Saves roll on the GM client through Dice+.
+            </div>
+            <input class="w-full text-xs" bind:value={npcName} placeholder="NPC name" />
+            <div class="grid grid-cols-2 gap-1 mt-1">
+              <select class="text-xs" value={npcKind} on:change={onNewNpcKindChange}>
+                {#each NPC_KINDS as kind}<option value={kind}>{kind}</option>{/each}
+              </select>
+              {#if npcKind === "Scout Henchman"}
+                <input
+                  class="text-xs"
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={npcLevel}
+                  on:change={onNewNpcLevelChange}
+                  aria-label="Scout Henchman level"
+                />
+              {:else}
+                <div class="text-[9px] text-gray-500 flex items-center px-1">
+                  {npcKind === "Guide Hireling"
+                    ? "Guide: Trailblaze PE"
+                    : npcKind === "Camp Hand Hireling"
+                      ? "Camp Hand: Make Camp PE"
+                      : npcKind === "Professional Quartermaster"
+                        ? "Quartermaster specialist"
+                        : "Customizable after adding"}
+                </div>
+              {/if}
+            </div>
+            <input
+              class="w-full text-xs mt-1"
+              bind:value={npcNotes}
+              placeholder="Region / notes (Guide should name its area)"
+            />
+            <button
+              class="mt-1 bg-black text-white rounded px-2 py-1 text-xs"
+              disabled={!npcName.trim()}
+              on:click={addNpc}
+            >
+              Add NPC
+            </button>
+          </div>
         {/if}
       </div>
     </div>

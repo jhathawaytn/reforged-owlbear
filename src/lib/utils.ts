@@ -22,6 +22,7 @@ export type SaveRollMode = "normal" | "advantage" | "disadvantage";
 
 export type SaveRollResult = {
   natural: number; // the kept d20, before modifiers
+  firstRoll: number; // literal first d20 rolled; some procedures key off this even when it isn't kept
   otherRoll?: number; // the die not kept, only for advantage/disadvantage
   modifier: number;
   total: number;
@@ -58,14 +59,14 @@ export function rollSave(
   }
 
   if (natural === 1) {
-    return { natural, otherRoll, modifier, total: natural + modifier, success: true, autoResult: "success" };
+    return { natural, firstRoll: a, otherRoll, modifier, total: natural + modifier, success: true, autoResult: "success" };
   }
   if (natural === 20) {
-    return { natural, otherRoll, modifier, total: natural + modifier, success: false, autoResult: "failure" };
+    return { natural, firstRoll: a, otherRoll, modifier, total: natural + modifier, success: false, autoResult: "failure" };
   }
 
   const total = natural + modifier;
-  return { natural, otherRoll, modifier, total, success: total <= targetAttribute };
+  return { natural, firstRoll: a, otherRoll, modifier, total, success: total <= targetAttribute };
 }
 
 // Parses simple dice notation like "d6", "2d6", "d6+2", "d8-1" and rolls it.

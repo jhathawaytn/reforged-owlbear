@@ -1,9 +1,9 @@
 import OBR from "@owlbear-rodeo/sdk";
 import { get, writable } from "svelte/store";
 import { PlayerCharacterStore } from "../model/ReforgedCharacter";
-import { rollReforgedSave, rollSingleDie } from "./DicePlus";
+import { rollDiceValues, rollReforgedSave, rollSingleDie } from "./DicePlus";
 import { showPopover } from "./Notifier";
-import type { Attribute } from "../types";
+import type { Attribute, ReforgedCharacter } from "../types";
 import type { SaveRollMode, SaveRollResult } from "../utils";
 
 const REQUEST_KEY = "rodeo.owlbear.reforged-sheet/expedition-roll-request";
@@ -11,6 +11,7 @@ const RESULT_KEY = "rodeo.owlbear.reforged-sheet/expedition-roll-result";
 
 export type ExpeditionRollKind =
   | "Trailblaze"
+  | "Keep Watch"
   | "Forage for Food"
   | "Forage for Water"
   | "Hunt"
@@ -19,6 +20,14 @@ export type ExpeditionRollKind =
   | "Forced March";
 
 export type ExpeditionAttributeMode = "INT" | "STR" | "HIGHER_INT_DEX" | "INT_OR_STR";
+export type ExpeditionSkill = "Wilderness Craft" | "Detection";
+
+export type TrailblazeBoonBane = {
+  type: "Boon" | "Bane";
+  code: string;
+  theme: string;
+  effect: string;
+};
 
 export type ExpeditionRollRequest = {
   requestId: string;
@@ -26,7 +35,8 @@ export type ExpeditionRollRequest = {
   kind: ExpeditionRollKind;
   attributeMode: ExpeditionAttributeMode;
   baseModifier: number;
-  useWildernessCraft: boolean;
+  skill?: ExpeditionSkill;
+  untrainedDisadvantage: boolean;
   hasAdvantage: boolean;
   hasDisadvantage: boolean;
   applyFailureFatigue: boolean;
@@ -43,12 +53,19 @@ export type ExpeditionRollResponse = {
   characterName: string;
   attribute?: Attribute;
   target?: number;
+  skill?: ExpeditionSkill;
   skillRank?: number;
   modifier?: number;
   mode?: SaveRollMode;
   roll?: SaveRollResult;
   outcome?: string;
+  boonBane?: TrailblazeBoonBane;
   fatigueApplied?: boolean;
+};
+
+export type ExpeditionOutcome = {
+  text: string;
+  boonBane?: TrailblazeBoonBane;
 };
 
 export const PendingExpeditionRollStore = writable<ExpeditionRollRequest | null>(null);
@@ -61,11 +78,11 @@ function id(): string {
   return `${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 
-function wildernessCraftRank(): number {
-  const pc = get(PlayerCharacterStore);
+export function skillRankForCharacter(pc: ReforgedCharacter, skill: ExpeditionSkill | undefined): number {
+  if (!skill) return 0;
   let highest = 0;
   for (const node of pc.skillTreeNodes) {
-    if (node.tree !== "Wilderness Craft") continue;
+    if (node.tree !== skill) continue;
     const match = node.node.match(/^R([1-4])$/);
     if (match) highest = Math.max(highest, parseInt(match[1], 10));
   }
@@ -82,52 +99,274 @@ function attributeFor(request: ExpeditionRollRequest, choice?: "INT" | "STR"): A
   return choice ?? "INT";
 }
 
-function rollModeFor(request: ExpeditionRollRequest, rank: number): SaveRollMode {
-  const hasAdvantage = request.hasAdvantage;
-  const hasDisadvantage =
-    request.hasDisadvantage || (request.useWildernessCraft && rank === 0);
-
-  if (hasAdvantage && hasDisadvantage) return "normal";
+export function expeditionRollMode(
+  hasAdvantage: boolean,
+  hasDisadvantage: boolean,
+  untrainedDisadvantage: boolean,
+): SaveRollMode {
+  const disadvantage = hasDisadvantage || untrainedDisadvantage;
+  if (hasAdvantage && disadvantage) return "normal";
   if (hasAdvantage) return "advantage";
-  if (hasDisadvantage) return "disadvantage";
+  if (disadvantage) return "disadvantage";
   return "normal";
 }
 
-async function outcomeFor(kind: ExpeditionRollKind, roll: SaveRollResult): Promise<string> {
+const BOON_BANE_TABLE: Record<string, { theme: string; boon: string; bane: string }> = {
+  "11": {
+    theme: "Shortcut / Detour",
+    boon: "Find a genuine shortcut; reduce the remaining journey by 1 travel unit.",
+    bane: "The obvious line is blocked or misleading; increase the remaining journey by 1 travel unit.",
+  },
+  "12": {
+    theme: "Clear Line / Tangle",
+    boon: "The next Trailblaze Save on this route has Advantage.",
+    bane: "The next Trailblaze Save has Disadvantage unless the Company spends a Quarter clearing or bypassing the obstruction.",
+  },
+  "13": {
+    theme: "Firm Ground / Bad Footing",
+    boon: "Ignore 1 Quarter of terrain-added travel time during this journey, minimum arrival.",
+    bane: "One traveler gains 1 Fatigue from a fall, bog, scramble, or similar hardship.",
+  },
+  "14": {
+    theme: "Easy Crossing / Bad Crossing",
+    boon: "The next ordinary crossing or similar obstacle costs no additional time.",
+    bane: "A crossing or obstacle costs 1 Quarter to overcome or bypass unless the Company accepts an obvious stated risk.",
+  },
+  "15": {
+    theme: "Weather Window / Weather Turn",
+    boon: "Ignore one time or Fatigue cost caused by today's weather this Quarter.",
+    bane: "Treat the next Quarter's weather effects as one step worse for travel purposes.",
+  },
+  "16": {
+    theme: "Open Passage / Choked Passage",
+    boon: "The Company may travel one additional Quarter today before Forced March begins.",
+    bane: "One otherwise safe travel Quarter today is consumed clearing or bypassing an obstruction.",
+  },
+  "21": {
+    theme: "Water",
+    boon: "Find a safe usable water source; refill normally.",
+    bane: "One accessible Water stock steps down one Usage Die.",
+  },
+  "22": {
+    theme: "Food",
+    boon: "Find 1 x d6 Fresh Ration without spending a Forage Quarter.",
+    bane: "One accessible ration stock steps down one Usage Die.",
+  },
+  "23": {
+    theme: "Fuel",
+    boon: "Find sufficient dry fuel for the next camp without consuming carried fuel solely for the fire.",
+    bane: "One applicable Torch, Oil, fuel, or light stock steps down one Usage Die.",
+  },
+  "24": {
+    theme: "Ammunition",
+    boon: "Recover usable ammunition; one applicable stock skips its next post-combat Usage roll.",
+    bane: "One applicable ammunition stock steps down one Usage Die.",
+  },
+  "25": {
+    theme: "Useful Material / Gear Damage",
+    boon: "Find ordinary material usable as an improvised tool for one immediate wilderness problem.",
+    bane: "One exposed ordinary item becomes Damaged; otherwise one minor ordinary item becomes unusable or is lost.",
+  },
+  "26": {
+    theme: "Secure Cache / Dropped Load",
+    boon: "Discover a dry memorable place where up to 2 slots may be cached and recovered on the return journey.",
+    bane: "A loose 1-slot load is dropped or left behind; spend a Quarter recovering it or abandon it.",
+  },
+  "31": {
+    theme: "Campsite",
+    boon: "The next Make Camp Save has Advantage if the Company uses this site.",
+    bane: "The next Make Camp Save has Disadvantage unless the Company spends time seeking another site.",
+  },
+  "32": {
+    theme: "Shelter / Exposure",
+    boon: "Find natural shelter; one ordinary weather interference cannot spoil the next Rest here.",
+    bane: "One traveler gains 1 Fatigue from exposure.",
+  },
+  "33": {
+    theme: "Dry Gear / Soaked Gear",
+    boon: "Protect bedding, shelter, and essential camp gear; ignore one ordinary weather-related camp supply consequence tonight.",
+    bane: "One relevant bedding/shelter item is soaked or compromised; the next camp must spend appropriate supplies or suffer weather interference. If none applies, one traveler gains 1 Fatigue.",
+  },
+  "34": {
+    theme: "Camp Water / Dry Ground",
+    boon: "Discover a safe usable water source suitable for camp.",
+    bane: "No usable local water can be established at the next camp in this area; rely on carried or previously established water.",
+  },
+  "35": {
+    theme: "Game / Barren Patch",
+    boon: "The next Hunt or Forage Save today has Advantage.",
+    bane: "The next Hunt or Forage Save made here has Disadvantage.",
+  },
+  "36": {
+    theme: "Hazard Read / Hidden Hazard",
+    boon: "Notice one ordinary nearby travel or camp hazard before it causes trouble.",
+    bane: "One plausible nearby hazard goes unnoticed until it matters; resolve its effects normally.",
+  },
+  "41": {
+    theme: "Tracks / Sign",
+    boon: "Learn reliable information from nearby signs: approximate number, direction, and recency where evidence supports it.",
+    bane: "The Company's own passage becomes obvious to a plausible nearby tracker or creature.",
+  },
+  "42": {
+    theme: "High Ground / Blind Ground",
+    boon: "The next Keep Watch Save today has Advantage.",
+    bane: "The next Keep Watch Save today has Disadvantage.",
+  },
+  "43": {
+    theme: "True Bearing / Disorientation",
+    boon: "Confirm direction from a reliable landmark and learn a useful estimate of the remaining journey.",
+    bane: "The Company loses orientation and becomes Lost; use result 12 instead if Lost is impossible in the fiction.",
+  },
+  "44": {
+    theme: "Weather Sign / Sudden Front",
+    boon: "Learn the next day's expected weather before its Pace is chosen.",
+    bane: "A sudden change worsens the next Quarter's weather effects by one step.",
+  },
+  "45": {
+    theme: "Regional Clue / Position Exposed",
+    boon: "Reveal a reliable Sign toward a nearby Destination, Discovery, resource, faction, or hazard already present in the region.",
+    bane: "The Company's movement reveals its position to one nearby threat or faction already established in the fiction.",
+  },
+  "46": {
+    theme: "Concealment / Obvious Passage",
+    boon: "Treat the Company as Cautious for today's Wilderness Event frequency without reducing Pace.",
+    bane: "Treat the Company as particularly obvious for today's Wilderness Event frequency.",
+  },
+  "51": {
+    theme: "Quiet Passage / Attention",
+    boon: "Skip the next normal Wilderness Event check today.",
+    bane: "Make an immediate Wilderness Event check.",
+  },
+  "52": {
+    theme: "Hazard Warning / Poor Position",
+    boon: "The next obstacle or hazard is noticed early enough to avoid, prepare for, or choose another approach.",
+    bane: "The next obstacle or hazard begins with the Company poorly positioned; normal Saves and Keep Watch still apply.",
+  },
+  "53": {
+    theme: "Creature Sign",
+    boon: "If a Creature Event occurs today, the Company detects signs early enough to choose whether to avoid, prepare, or investigate.",
+    bane: "If a Creature Event occurs today, its approach begins from an unfavorable direction; failed Keep Watch leaves the Company clearly unprepared.",
+  },
+  "54": {
+    theme: "Travelers",
+    boon: "If travelers, rivals, or another intelligent group is encountered today, the Company notices them first and may decide whether to reveal itself.",
+    bane: "Such a group already present notices the Company's passage first; Reaction still determines disposition.",
+  },
+  "55": {
+    theme: "Discovery",
+    boon: "Reveal a small useful Discovery appropriate to the region.",
+    bane: "Reveal a dangerous, costly, or troublesome Discovery or Sign appropriate to the region; no automatic combat.",
+  },
+  "56": {
+    theme: "Event Rhythm",
+    boon: "No random Wilderness Event occurs for the remainder of today unless already established by the fiction.",
+    bane: "A Wilderness Event occurs today without requiring its normal trigger roll.",
+  },
+  "61": {
+    theme: "Old Road / Broken Road",
+    boon: "Discover and record an old path or better line; reduce this journey's remaining distance by 1 travel unit.",
+    bane: "A washout, collapse, closure, or similar obstacle increases the remaining journey by 1 travel unit until bypassed, repaired, or superseded.",
+  },
+  "62": {
+    theme: "Abandoned Camp",
+    boon: "Find an old usable camp with ordinary shelter or fuel already present.",
+    bane: "Signs show the obvious campsite was abandoned for a good reason; using it anyway gives Make Camp Disadvantage.",
+  },
+  "63": {
+    theme: "Local Guidance / Boundary",
+    boon: "A local sign, marker, trail, or reliable clue gives Advantage on the next two Trailblaze Saves along this route.",
+    bane: "A closure, territorial boundary, dangerous crossing, or similar obstacle forces a choice: spend 1 Quarter bypassing it or knowingly accept the stated risk.",
+  },
+  "64": {
+    theme: "Resource Pocket / Depletion",
+    boon: "Find 1 x d6 Fresh Ration, usable water, ordinary fuel, or useful natural material - whichever best fits the terrain.",
+    bane: "One fictionally appropriate carried Usage stock steps down one die. If none applies, one traveler gains 1 Fatigue.",
+  },
+  "65": {
+    theme: "Fortune / Misfortune",
+    boon: "Choose any other Boon on this table that fits the fiction.",
+    bane: "GM chooses any other Bane on this table that fits the fiction.",
+  },
+  "66": {
+    theme: "Major Discovery / Major Complication",
+    boon: "Reveal a meaningful beneficial Opportunity or Discovery already supported by the region.",
+    bane: "Reveal a major Sign, dangerous Discovery, or regional complication already supported by the setting.",
+  },
+};
+
+async function trailblazeBoonBane(roll: SaveRollResult): Promise<TrailblazeBoonBane | undefined> {
+  const critical = roll.firstRoll ?? roll.natural;
+  const type = critical === 1 ? "Boon" : critical === 20 ? "Bane" : undefined;
+  if (!type) return undefined;
+
+  const dice = await rollDiceValues(2, 6, { rollTarget: "everyone", showResults: true });
+  const code = `${dice[0]}${dice[1]}`;
+  const entry = BOON_BANE_TABLE[code];
+  if (!entry) return undefined;
+
+  return {
+    type,
+    code,
+    theme: entry.theme,
+    effect: type === "Boon" ? entry.boon : entry.bane,
+  };
+}
+
+export async function resolveExpeditionOutcome(
+  kind: ExpeditionRollKind,
+  roll: SaveRollResult,
+): Promise<ExpeditionOutcome> {
   if (kind === "Forced March") {
-    return roll.success
-      ? "Forced March succeeds; traveler may complete this Quarter."
-      : "Forced March fails: +1 Fatigue and this traveler cannot travel another Quarter today.";
+    return {
+      text: roll.success
+        ? "Forced March succeeds; traveler may complete this Quarter."
+        : "Forced March fails: +1 Fatigue and this traveler cannot travel another Quarter today.",
+    };
+  }
+  if (kind === "Keep Watch") {
+    return {
+      text: roll.success
+        ? "Keep Watch succeeds: the Company is not surprised and may avoid, prepare for, or approach what is ahead."
+        : "Keep Watch fails: resolve the encounter with the Company unprepared.",
+    };
   }
   if (kind === "Trailblaze") {
+    const boonBane = await trailblazeBoonBane(roll);
     const pieces = [roll.success ? "Quarter progress succeeds." : "Quarter spent; no progress."];
-    if (roll.natural === 1) pieces.push("Natural 1: Travel Boon.");
-    if (roll.natural === 20) pieces.push("Natural 20: Travel Bane.");
-    return pieces.join(" ");
+    if (boonBane) {
+      pieces.push(`${boonBane.type} ${boonBane.code} - ${boonBane.theme}: ${boonBane.effect}`);
+    }
+    return { text: pieces.join(" "), boonBane };
   }
   if (kind === "Forage for Food") {
-    return roll.success ? "Gain 1 × d6 Fresh Ration." : "Nothing found; Quarter spent.";
+    return { text: roll.success ? "Gain 1 x d6 Fresh Ration." : "Nothing found; Quarter spent." };
   }
   if (kind === "Forage for Water") {
-    return roll.success
-      ? "Establish a usable local water source if the terrain and fiction support one."
-      : "No usable water found; Quarter spent.";
+    return {
+      text: roll.success
+        ? "Establish a usable local water source if the terrain and fiction support one."
+        : "No usable water found; Quarter spent.",
+    };
   }
   if (kind === "Hunt") {
-    if (!roll.success) return "No prey taken; Quarter spent.";
+    if (!roll.success) return { text: "No prey taken; Quarter spent." };
     const prey = await rollSingleDie(6, { rollTarget: "everyone", showResults: true });
     const stocks = prey <= 3 ? 1 : prey <= 5 ? 2 : 4;
-    return `Prey d6 = ${prey}: gain ${stocks} × d6 Fresh Ration${stocks === 1 ? "" : "s"}.${roll.natural === 1 ? " Also recover a hide or other usable material." : ""}`;
+    return {
+      text: `Prey d6 = ${prey}: gain ${stocks} x d6 Fresh Ration${stocks === 1 ? "" : "s"}.${roll.natural === 1 ? " Also recover a hide or other usable material." : ""}`,
+    };
   }
   if (kind === "Fish") {
-    if (!roll.success) return "No useful catch; Quarter spent.";
+    if (!roll.success) return { text: "No useful catch; Quarter spent." };
     const catchRoll = await rollSingleDie(6, { rollTarget: "everyone", showResults: true });
     const stocks = catchRoll <= 3 ? 1 : catchRoll <= 5 ? 2 : 3;
-    return `Catch d6 = ${catchRoll}: gain ${stocks} × d6 Fresh Ration${stocks === 1 ? "" : "s"}.`;
+    return { text: `Catch d6 = ${catchRoll}: gain ${stocks} x d6 Fresh Ration${stocks === 1 ? "" : "s"}.` };
   }
-  return roll.success
-    ? "Camp established; it supports a Normal Rest when the Company Sleeps."
-    : "Camp established but supports only a Perilous Rest; GM applies one listed consequence.";
+  return {
+    text: roll.success
+      ? "Camp established; it supports a Normal Rest when the Company Sleeps."
+      : "Camp established but supports only a Perilous Rest; GM applies one listed consequence.",
+  };
 }
 
 export function initExpeditionRolls(): void {
@@ -177,12 +416,16 @@ export async function resolvePendingExpeditionRoll(choice?: "INT" | "STR"): Prom
   if (request.attributeMode === "INT_OR_STR" && !choice) return null;
 
   const pc = get(PlayerCharacterStore);
-  const rank = request.useWildernessCraft ? wildernessCraftRank() : 0;
+  const rank = skillRankForCharacter(pc, request.skill);
   const attribute = attributeFor(request, choice);
-  const modifier = request.baseModifier - (request.useWildernessCraft ? rank * 2 : 0);
-  const mode = rollModeFor(request, rank);
+  const modifier = request.baseModifier - rank * 2;
+  const mode = expeditionRollMode(
+    request.hasAdvantage,
+    request.hasDisadvantage,
+    request.untrainedDisadvantage && !!request.skill && rank === 0,
+  );
   const roll = await rollReforgedSave(pc.attributes[attribute], modifier, mode, "everyone");
-  const outcome = await outcomeFor(request.kind, roll);
+  const outcome = await resolveExpeditionOutcome(request.kind, roll);
 
   let fatigueApplied = false;
   if (request.applyFailureFatigue && !roll.success) {
@@ -199,11 +442,13 @@ export async function resolvePendingExpeditionRoll(choice?: "INT" | "STR"): Prom
     characterName: pc.name || (await OBR.player.getName()),
     attribute,
     target: pc.attributes[attribute],
-    skillRank: request.useWildernessCraft ? rank : undefined,
+    skill: request.skill,
+    skillRank: request.skill ? rank : undefined,
     modifier,
     mode,
     roll,
-    outcome,
+    outcome: outcome.text,
+    boonBane: outcome.boonBane,
     fatigueApplied,
   };
 
