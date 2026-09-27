@@ -148,16 +148,18 @@ async function initPlayer() {
   PlayerMetaDataStore.set(playerMd);
   PlayerCharacterStore.set(playerMd[`slot-${get(CurrentSaveSlot)}` as const]);
 
-  PlayerCharacterStore.subscribe(
-    debounce((pc: ReforgedCharacter) => {
-      if (get(isGM) && !get(isTrackedPlayerGM)) return;
+  // Keep the local save-slot model in sync immediately so Owlbear/party
+  // metadata refreshes can never rehydrate a stale copy over a just-made edit.
+  // Only the network write is debounced.
+  PlayerCharacterStore.subscribe((pc: ReforgedCharacter) => {
+    if (get(isGM) && !get(isTrackedPlayerGM)) return;
 
-      const pmd = get(PlayerMetaDataStore);
-      const slot = get(CurrentSaveSlot);
-      pmd[`slot-${slot}` as const] = pc;
-      PlayerMetaDataStore.set(pmd);
-    }, 1000),
-  );
+    const slot = get(CurrentSaveSlot);
+    PlayerMetaDataStore.set({
+      ...get(PlayerMetaDataStore),
+      [`slot-${slot}` as const]: pc,
+    });
+  });
 
   CurrentSaveSlot.subscribe((slot) => {
     if (get(isGM) && !get(isTrackedPlayerGM)) return;
@@ -167,16 +169,22 @@ async function initPlayer() {
     PlayerCharacterStore.set(withDefaults(pmd[`slot-${slot}` as const]));
   });
 
-  PlayerMetaDataStore.subscribe((pmd) => {
-    if (get(isGM)) {
-      if (!get(isTrackedPlayerGM)) return;
-      const pmdMap = get(PlayerMetaDataMapStore);
-      const pId = get(GmId);
-      pmdMap[pId] = pmd;
-    }
-
+  const persistPlayerMetadata = debounce((pmd: PlayerMetaData) => {
     OBR.player.setMetadata({
       [pluginId("sheetData")]: pmd,
     });
+  }, 1000);
+
+  PlayerMetaDataStore.subscribe((pmd) => {
+    if (get(isGM)) {
+      if (!get(isTrackedPlayerGM)) return;
+      const pId = get(GmId);
+      PlayerMetaDataMapStore.update((pmdMap) => ({
+        ...pmdMap,
+        [pId]: pmd,
+      }));
+    }
+
+    persistPlayerMetadata(pmd);
   });
 }
