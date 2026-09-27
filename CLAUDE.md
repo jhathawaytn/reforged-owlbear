@@ -34,6 +34,13 @@ Owlbear: Profile → My Extensions → Add custom extension →
 or Owlbear shows "Failed to fetch". If `public/manifest.json` changes (size, title, icon),
 remove and re-add the extension.
 
+**Live for the team:** `https://jhathawaytn.github.io/reforged-owlbear/manifest.json` —
+public repo at `github.com/jhathawaytn/reforged-owlbear`, auto-deployed by
+`.github/workflows/deploy.yml` on every push to `main` (build → GitHub Pages, no manual
+step). `vite.config.ts`'s `base: "./"` and the manifest's/`Notifier.ts`'s relative paths
+exist specifically so this works under a Pages project subpath instead of a domain root -
+don't reintroduce a leading `/` in those paths.
+
 ## Stack & architecture
 
 Svelte 3 + TypeScript + Tailwind + Vite. Two entry points: `index.html` (sheet) and
