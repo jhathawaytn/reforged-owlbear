@@ -39,7 +39,7 @@ export async function showPopover(msg: string) {
   try {
     await OBR.popover.open({
       id: popoverId,
-      url: `/popover.html?msg=${encodeURIComponent(msg)}`,
+      url: `./popover.html?msg=${encodeURIComponent(msg)}`,
       height: 100,
       width: 400,
     });
