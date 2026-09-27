@@ -3,9 +3,11 @@
 </script>
 
 <button
-  class="bg-black text-white px-1"
-  title={$Page === "expedition" ? "Back to character sheet" : "Company Expedition"}
-  on:click={() => ($Page = $Page === "expedition" ? "sheet" : "expedition")}
+  class="text-white px-1 rounded-md"
+  class:bg-green-600={$Page === "expedition"}
+  class:bg-black={$Page !== "expedition"}
+  title="Company Expedition"
+  on:click={() => ($Page = "expedition")}
 >
-  <i class="material-icons translate-y-1">{$Page === "expedition" ? "arrow_back" : "explore"}</i>
+  <i class="material-icons translate-y-1">explore</i>
 </button>

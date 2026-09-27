@@ -129,6 +129,15 @@
               {/if}
               <OptionsButton bind:files />
               <ResumeCharacterCreatorButton />
+              {#if $Page !== "sheet"}
+                <button
+                  class="bg-black text-white rounded-md px-1"
+                  title="Back to character sheet"
+                  on:click={() => ($Page = "sheet")}
+                >
+                  <i class="material-icons translate-y-1">arrow_back</i>
+                </button>
+              {/if}
               <EquipmentButton />
               <ExpeditionButton />
               <NotesButton />
