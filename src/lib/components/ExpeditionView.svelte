@@ -8,6 +8,8 @@
     type RouteMode,
     type TravelPace,
     type TravelTerrain,
+    type TravelClimate,
+    type TravelWeatherEffect,
     type WildernessExpeditionState,
     type ExplorationExpeditionState,
     type ExpeditionAssignment,
@@ -23,6 +25,7 @@
     type ExpeditionRollResponse,
     type ExpeditionAttributeMode,
   } from "../services/ExpeditionRolls";
+  import { rollDiceValues } from "../services/DicePlus";
 
   type CompanyMember = { id: string; name: string };
   type QuarterTask = {
@@ -32,6 +35,10 @@
     playerName: string;
     attributeMode: ExpeditionAttributeMode;
     baseModifier: number;
+    useWildernessCraft: boolean;
+    hasAdvantage: boolean;
+    hasDisadvantage: boolean;
+    applyFailureFatigue: boolean;
     note?: string;
     status: "ready" | "waiting" | "done";
     response?: ExpeditionRollResponse;
@@ -41,6 +48,13 @@
   const ROUTES: RouteMode[] = ["Known Route", "Unmapped Country"];
   const PACES: TravelPace[] = ["Cautious", "Steady", "Forced"];
   const TERRAINS: TravelTerrain[] = ["Open", "Broken", "Difficult", "Severe"];
+  const CLIMATES: TravelClimate[] = [
+    "Cold / Winter",
+    "Temperate Spring / Fall",
+    "Temperate Summer",
+    "Tropical",
+    "Desert / Arid",
+  ];
   const ACTIVITIES: WildernessActivity[] = [
     "Travel",
     "Forage for Food",
@@ -57,6 +71,7 @@
   let quarterTasks: QuarterTask[] = [];
   let quarterPlanActive = false;
   let quarterMessage = "";
+  let dayMessage = "";
   let playerRollBusy = false;
 
   $: {
@@ -98,7 +113,21 @@
   );
   $: travelingThisQuarter =
     !haltsForActivity && assignedCompany.some(({ assignment }) => assignment.activity === "Travel");
-  $: allQuarterTasksDone = quarterPlanActive && quarterTasks.every((task) => task.status === "done");
+  $: forcedMarchFailures = quarterTasks.filter(
+    (task) => task.kind === "Forced March" && task.response?.roll?.success === false,
+  );
+  $: allQuarterTasksDone =
+    quarterPlanActive &&
+    quarterTasks.every((task) => task.status === "done") &&
+    forcedMarchFailures.length === 0;
+  $: paceTravelTarget =
+    $expedition.wilderness.pace === "Cautious"
+      ? 1
+      : $expedition.wilderness.pace === "Steady"
+        ? 2
+        : $expedition.wilderness.forcedTravelTarget;
+  $: weatherReady = $expedition.wilderness.weatherRolledDay === $expedition.wilderness.day;
+  $: paceReady = $expedition.wilderness.paceDeclaredDay === $expedition.wilderness.day;
 
   async function setMode(mode: ExpeditionMode) {
     if (!$isGM) return;
@@ -131,6 +160,184 @@
     return QUARTERS.indexOf(q);
   }
 
+  function weatherNextModifier(modified: number): number {
+    if (modified <= 2) return -1;
+    if (modified === 3) return -2;
+    if (modified === 4 || modified === 5) return -1;
+    if (modified <= 7) return 0;
+    if (modified === 8) return 1;
+    if (modified === 9) return 2;
+    return 1;
+  }
+
+  function weatherDescription(climate: TravelClimate, modified: number): string {
+    if (modified >= 10) return "Clear skies";
+    if (modified === 9) return climate === "Desert / Arid" ? "High thin clouds" : "Scattered clouds";
+    if (modified === 8) return climate === "Desert / Arid" ? "Cloudy / haze" : "Cloudy";
+    if (modified >= 6) return climate === "Desert / Arid" ? "Overcast / heavy haze" : "Overcast";
+
+    if (climate === "Cold / Winter") {
+      if (modified <= 2) return "Blizzard";
+      if (modified === 3) return "Heavy snow";
+      if (modified === 4) return "Snow";
+      return "Light snow / flurries";
+    }
+    if (climate === "Temperate Spring / Fall") {
+      if (modified <= 2) return "Thunderstorm / Torrential Rain";
+      if (modified === 3) return "Heavy rain";
+      if (modified === 4) return "Rain";
+      return "Light rain / drizzle";
+    }
+    if (climate === "Temperate Summer") {
+      if (modified <= 2) return "Thunderstorm / Torrential Rain";
+      if (modified === 3) return "Heavy rain";
+      if (modified === 4) return "Rain / showers";
+      return "Light rain / warm showers";
+    }
+    if (climate === "Tropical") {
+      if (modified <= 2) return "Thunderstorm / Torrential Rain";
+      if (modified === 3) return "Heavy rain / downpour";
+      if (modified === 4) return "Rain";
+      return "Light showers";
+    }
+
+    if (modified <= 2) return "Sandstorm";
+    if (modified === 3) return "Dust storm";
+    if (modified === 4) return "Blowing sand";
+    return "Dusty wind";
+  }
+
+  function weatherEffectFor(modified: number): TravelWeatherEffect {
+    if (modified <= 2) return "severe";
+    if (modified === 3) return "heavy";
+    return "normal";
+  }
+
+  function extremeCandidate(climate: TravelClimate): "" | "Cold Snap" | "Heat Wave" {
+    if (climate === "Cold / Winter") return "Cold Snap";
+    if (climate === "Temperate Summer" || climate === "Tropical" || climate === "Desert / Arid") {
+      return "Heat Wave";
+    }
+    return "";
+  }
+
+  function weatherTravelDelay(): number {
+    if ($expedition.wilderness.weatherEffect === "heavy") return 1;
+    if ($expedition.wilderness.weatherEffect === "severe") return 2;
+    return 0;
+  }
+
+  function weatherDisadvantages(kind: ExpeditionRollKind): boolean {
+    const effect = $expedition.wilderness.weatherEffect;
+    if (effect === "heavy") {
+      return ["Trailblaze", "Forage for Food", "Forage for Water", "Hunt", "Fish", "Make Camp"].includes(kind);
+    }
+    if (effect === "severe") {
+      return kind === "Trailblaze" || kind === "Make Camp";
+    }
+    if (effect === "cold-snap" || effect === "heat-wave") {
+      return kind === "Forage for Food" || kind === "Forage for Water" || kind === "Hunt";
+    }
+    return false;
+  }
+
+  function weatherUnavailable(kind: ExpeditionRollKind): boolean {
+    return (
+      $expedition.wilderness.weatherEffect === "severe" &&
+      ["Forage for Food", "Forage for Water", "Hunt", "Fish"].includes(kind)
+    );
+  }
+
+  function advanceClock(q: TravelQuarter, steps: number): { quarter: TravelQuarter; daysAdvanced: number } {
+    const total = quarterIndex(q) + steps;
+    return {
+      quarter: QUARTERS[total % QUARTERS.length],
+      daysAdvanced: Math.floor(total / QUARTERS.length),
+    };
+  }
+
+  async function rollWeather() {
+    if (!$isGM || weatherReady) return;
+    clearQuarterPlan();
+    dayMessage = "";
+
+    const priorModified = $expedition.wilderness.weatherModifiedRoll;
+    const priorDay = $expedition.wilderness.weatherRolledDay;
+    const priorModifier = $expedition.wilderness.weatherModifier;
+    const dice = await rollDiceValues(2, 6, { rollTarget: "everyone", showResults: true });
+    const natural = dice[0] + dice[1];
+
+    let modified = natural + priorModifier;
+    let weather = "";
+    let nextModifier = 0;
+    let effect: TravelWeatherEffect = "normal";
+
+    if (natural === 7) {
+      modified = 7;
+      weather = $expedition.wilderness.climate === "Desert / Arid" ? "Overcast / heavy haze" : "Overcast";
+      nextModifier = 0;
+    } else {
+      weather = weatherDescription($expedition.wilderness.climate, modified);
+      nextModifier = weatherNextModifier(modified);
+      effect = weatherEffectFor(modified);
+    }
+
+    const candidate =
+      modified >= 10 &&
+      priorDay === $expedition.wilderness.day - 1 &&
+      priorModified >= 10
+        ? extremeCandidate($expedition.wilderness.climate)
+        : "";
+
+    await patchWilderness({
+      weather,
+      weatherEffect: effect,
+      weatherModifier: nextModifier,
+      weatherNaturalRoll: natural,
+      weatherModifiedRoll: modified,
+      weatherRolledDay: $expedition.wilderness.day,
+      weatherExtremeCandidate: candidate,
+      paceDeclaredDay: 0,
+    });
+  }
+
+  async function applyWeatherExtreme(kind: "Cold Snap" | "Heat Wave") {
+    if (!$isGM) return;
+    await patchWilderness({
+      weather: kind,
+      weatherEffect: kind === "Cold Snap" ? "cold-snap" : "heat-wave",
+      weatherExtremeCandidate: "",
+    });
+  }
+
+  async function keepClearWeather() {
+    if (!$isGM) return;
+    await patchWilderness({ weatherExtremeCandidate: "" });
+  }
+
+  async function applyWeatherExtremeCandidate() {
+    const candidate = $expedition.wilderness.weatherExtremeCandidate;
+    if (candidate === "Cold Snap" || candidate === "Heat Wave") {
+      await applyWeatherExtreme(candidate);
+    }
+  }
+
+  async function declarePace() {
+    if (!$isGM) return;
+    if (!weatherReady) {
+      dayMessage = "Roll and announce today's Weather before declaring Pace.";
+      return;
+    }
+    dayMessage = "";
+    await patchWilderness({ paceDeclaredDay: $expedition.wilderness.day });
+  }
+
+  async function unlockPace() {
+    if (!$isGM) return;
+    clearQuarterPlan();
+    await patchWilderness({ paceDeclaredDay: 0 });
+  }
+
   function terrainPressure(): number {
     const terrain = $expedition.wilderness.terrain;
     return terrain === "Difficult" ? 2 : terrain === "Severe" ? 4 : 0;
@@ -149,7 +356,29 @@
 
   function onPaceChange(e: Event) {
     clearQuarterPlan();
-    patchWilderness({ pace: (e.currentTarget as HTMLSelectElement).value as TravelPace });
+    patchWilderness({
+      pace: (e.currentTarget as HTMLSelectElement).value as TravelPace,
+      paceDeclaredDay: 0,
+    });
+  }
+
+  function onForcedTravelTargetChange(e: Event) {
+    clearQuarterPlan();
+    patchWilderness({
+      forcedTravelTarget: parseInt((e.currentTarget as HTMLSelectElement).value, 10) === 4 ? 4 : 3,
+      paceDeclaredDay: 0,
+    });
+  }
+
+  function onClimateChange(e: Event) {
+    clearQuarterPlan();
+    patchWilderness({
+      climate: (e.currentTarget as HTMLSelectElement).value as TravelClimate,
+      weatherRolledDay: 0,
+      paceDeclaredDay: 0,
+      weather: "Not rolled",
+      weatherExtremeCandidate: "",
+    });
   }
 
   function onTerrainChange(e: Event) {
@@ -228,8 +457,14 @@
     kind: ExpeditionRollKind,
     member: CompanyMember,
     attributeMode: ExpeditionAttributeMode,
-    baseModifier = 0,
-    note?: string,
+    options: {
+      baseModifier?: number;
+      useWildernessCraft?: boolean;
+      hasAdvantage?: boolean;
+      hasDisadvantage?: boolean;
+      applyFailureFatigue?: boolean;
+      note?: string;
+    } = {},
   ): QuarterTask {
     return {
       id: `${kind}:${member.id}`,
@@ -237,8 +472,12 @@
       playerId: member.id,
       playerName: member.name,
       attributeMode,
-      baseModifier,
-      note,
+      baseModifier: options.baseModifier ?? 0,
+      useWildernessCraft: options.useWildernessCraft ?? true,
+      hasAdvantage: options.hasAdvantage ?? false,
+      hasDisadvantage: options.hasDisadvantage ?? false,
+      applyFailureFatigue: options.applyFailureFatigue ?? false,
+      note: options.note,
       status: "ready",
     };
   }
@@ -255,32 +494,113 @@
       return;
     }
 
-    if (travelingThisQuarter && $expedition.wilderness.routeMode === "Unmapped Country") {
-      const trailAssignment = currentAssignments.find((a) => a.role === "Trailblazer");
-      const trailMember = trailAssignment ? company.find((p) => p.id === trailAssignment.playerId) : undefined;
-      if (!trailAssignment || !trailMember) {
+    if (travelingThisQuarter) {
+      if (!weatherReady) {
         quarterPlanActive = false;
         quarterTasks = [];
-        quarterMessage = "Unmapped travel requires a connected Trailblazer before this Quarter can resolve.";
+        quarterMessage = "Roll and announce today's Weather before resolving a travel Quarter.";
         return;
       }
-      tasks.push(
-        makeTask(
-          "Trailblaze",
-          trailMember,
-          "INT",
-          terrainPressure(),
-          `Terrain pressure: ${$expedition.wilderness.terrain} ${terrainPressure() ? `+${terrainPressure()}` : "+0"}.`,
-        ),
+      if (!paceReady) {
+        quarterPlanActive = false;
+        quarterTasks = [];
+        quarterMessage = "Declare today's Pace before resolving a travel Quarter.";
+        return;
+      }
+      if ($expedition.wilderness.travelQuartersToday >= paceTravelTarget) {
+        quarterPlanActive = false;
+        quarterTasks = [];
+        quarterMessage =
+          `${$expedition.wilderness.pace} Pace allows ${paceTravelTarget} travel Quarter${paceTravelTarget === 1 ? "" : "s"} today. Choose a non-Travel Activity or change the day plan.`;
+        return;
+      }
+
+      const stopped = assignedCompany.filter(
+        ({ member, assignment }) =>
+          assignment.activity === "Travel" &&
+          $expedition.wilderness.forcedMarchStoppedPlayerIds.includes(member.id),
       );
+      if (stopped.length) {
+        quarterPlanActive = false;
+        quarterTasks = [];
+        quarterMessage =
+          `${stopped.map(({ member }) => member.name).join(", ")} already failed a Forced March today and cannot travel another Quarter.`;
+        return;
+      }
+
+      // The third and fourth traveling Quarters are Forced Marches.
+      if ($expedition.wilderness.travelQuartersToday >= 2) {
+        for (const entry of assignedCompany.filter(({ assignment }) => assignment.activity === "Travel")) {
+          tasks.push(
+            makeTask("Forced March", entry.member, "STR", {
+              useWildernessCraft: false,
+              hasDisadvantage: true,
+              applyFailureFatigue: true,
+              note:
+                "Forced March: STR Save with Disadvantage. Failure adds 1 Fatigue and prevents another travel Quarter today.",
+            }),
+          );
+        }
+      }
+
+      if ($expedition.wilderness.routeMode === "Unmapped Country") {
+        const trailAssignment = currentAssignments.find((a) => a.role === "Trailblazer");
+        const trailMember = trailAssignment ? company.find((p) => p.id === trailAssignment.playerId) : undefined;
+        if (!trailAssignment || !trailMember) {
+          quarterPlanActive = false;
+          quarterTasks = [];
+          quarterMessage = "Unmapped travel requires a connected Trailblazer before this Quarter can resolve.";
+          return;
+        }
+
+        const cautiousAdvantage = $expedition.wilderness.pace === "Cautious";
+        const weatherDisadvantage = weatherDisadvantages("Trailblaze");
+        const delay = weatherTravelDelay();
+        tasks.push(
+          makeTask("Trailblaze", trailMember, "INT", {
+            baseModifier: terrainPressure(),
+            useWildernessCraft: true,
+            hasAdvantage: cautiousAdvantage,
+            hasDisadvantage: weatherDisadvantage,
+            note:
+              `Terrain: ${$expedition.wilderness.terrain} ${terrainPressure() ? `+${terrainPressure()}` : "+0"}.` +
+              `${cautiousAdvantage ? " Cautious Pace grants Advantage." : ""}` +
+              `${weatherDisadvantage ? ` ${$expedition.wilderness.weather} imposes Disadvantage.` : ""}` +
+              `${delay ? ` Weather adds ${delay} Quarter${delay === 1 ? "" : "s"} of travel time.` : ""}`,
+          }),
+        );
+      }
     }
 
     for (const entry of assignedCompany) {
       const activity = entry.assignment.activity;
+      let kind: ExpeditionRollKind | null = null;
+      let attributeMode: ExpeditionAttributeMode = "INT";
+
       if (activity === "Forage for Food" || activity === "Forage for Water") {
-        tasks.push(makeTask(activity, entry.member, "INT"));
+        kind = activity;
+        attributeMode = "INT";
       } else if (activity === "Hunt" || activity === "Fish") {
-        tasks.push(makeTask(activity, entry.member, "HIGHER_INT_DEX"));
+        kind = activity;
+        attributeMode = "HIGHER_INT_DEX";
+      }
+
+      if (kind) {
+        if (weatherUnavailable(kind)) {
+          quarterPlanActive = false;
+          quarterTasks = [];
+          quarterMessage =
+            `${kind} is Unavailable in ${$expedition.wilderness.weather} unless a specific capability or established fiction makes it possible.`;
+          return;
+        }
+        tasks.push(
+          makeTask(kind, entry.member, attributeMode, {
+            hasDisadvantage: weatherDisadvantages(kind),
+            note: weatherDisadvantages(kind)
+              ? `${$expedition.wilderness.weather}: this Activity is at Disadvantage.`
+              : undefined,
+          }),
+        );
       }
     }
 
@@ -289,18 +609,23 @@
       quarterPlanActive = false;
       quarterTasks = [];
       quarterMessage =
-        "More than one character is assigned Make Camp. The rules require one leader and helpers; leader/helper selection is the next resolver step. Leave only the leader on Make Camp for this pass.";
+        "More than one character is assigned Make Camp. The rules require one leader and helpers; leave only the leader on Make Camp for this pass.";
       return;
     }
     if (campMembers.length === 1) {
+      const severeNote =
+        $expedition.wilderness.weatherEffect === "severe"
+          ? " Severe storm conditions may make adequate camping impossible without suitable gear, capability, shelter, or established fiction."
+          : "";
       tasks.push(
-        makeTask(
-          "Make Camp",
-          campMembers[0].member,
-          "INT_OR_STR",
-          terrainPressure(),
-          `Terrain pressure: ${$expedition.wilderness.terrain} ${terrainPressure() ? `+${terrainPressure()}` : "+0"}.`,
-        ),
+        makeTask("Make Camp", campMembers[0].member, "INT_OR_STR", {
+          baseModifier: terrainPressure(),
+          hasDisadvantage: weatherDisadvantages("Make Camp"),
+          note:
+            `Terrain: ${$expedition.wilderness.terrain} ${terrainPressure() ? `+${terrainPressure()}` : "+0"}.` +
+            `${weatherDisadvantages("Make Camp") ? ` ${$expedition.wilderness.weather} imposes Disadvantage.` : ""}` +
+            severeNote,
+        }),
       );
     }
 
@@ -321,6 +646,10 @@
       kind: task.kind,
       attributeMode: task.attributeMode,
       baseModifier: task.baseModifier,
+      useWildernessCraft: task.useWildernessCraft,
+      hasAdvantage: task.hasAdvantage,
+      hasDisadvantage: task.hasDisadvantage,
+      applyFailureFatigue: task.applyFailureFatigue,
       note: task.note,
     });
 
@@ -341,6 +670,14 @@
     current.status = "done";
     current.response = response;
     quarterTasks = [...quarterTasks];
+
+    if (response.kind === "Forced March" && response.roll?.success === false) {
+      await patchWilderness({
+        forcedMarchStoppedPlayerIds: [
+          ...new Set([...$expedition.wilderness.forcedMarchStoppedPlayerIds, response.targetPlayerId]),
+        ],
+      });
+    }
   }
 
   async function completeQuarter() {
@@ -358,18 +695,29 @@
     }
     if (progressMade) progress += 1;
 
-    const next = nextQuarter($expedition.wilderness.quarter);
+    const weatherDelay = travelingThisQuarter ? weatherTravelDelay() : 0;
+    const clockCost = 1 + weatherDelay;
+    const next = advanceClock($expedition.wilderness.quarter, clockCost);
     const completedLabel = `Day ${$expedition.wilderness.day} ${$expedition.wilderness.quarter}`;
+    const travelCount = $expedition.wilderness.travelQuartersToday + (travelingThisQuarter ? 1 : 0);
+    const nextDay = $expedition.wilderness.day + next.daysAdvanced;
+
     await patchWilderness({
       progress,
       quarter: next.quarter,
-      day: $expedition.wilderness.day + (next.newDay ? 1 : 0),
+      day: nextDay,
+      travelQuartersToday: next.daysAdvanced ? 0 : travelCount,
+      forcedMarchStoppedPlayerIds: next.daysAdvanced ? [] : $expedition.wilderness.forcedMarchStoppedPlayerIds,
       assignments: [],
     });
 
     quarterTasks = [];
     quarterPlanActive = false;
-    quarterMessage = `${completedLabel} resolved. ${progressMade ? "Travel progress +1." : travelingThisQuarter ? "No travel progress." : "Company did not travel."}`;
+    quarterMessage =
+      `${completedLabel} resolved. ` +
+      `${progressMade ? "Travel progress +1. " : travelingThisQuarter ? "No travel progress. " : "Company did not travel. "}` +
+      `${weatherDelay ? `Weather consumed +${weatherDelay} additional Quarter${weatherDelay === 1 ? "" : "s"}. ` : ""}` +
+      `${next.daysAdvanced ? `Day ${nextDay} begins; roll new Weather and declare a new Pace before further travel.` : ""}`;
   }
 
   async function playerResolve(choice?: "INT" | "STR") {
@@ -438,26 +786,128 @@
             </select>
           </label>
           <label>
-            Pace
-            <select disabled={!$isGM} value={$expedition.wilderness.pace} on:change={onPaceChange}>
-              {#each PACES as pace}<option value={pace}>{pace}</option>{/each}
-            </select>
-          </label>
-          <label>
             Terrain
             <select disabled={!$isGM} value={$expedition.wilderness.terrain} on:change={onTerrainChange}>
               {#each TERRAINS as terrain}<option value={terrain}>{terrain}</option>{/each}
             </select>
           </label>
           <label>
-            Weather
-            <input
-              disabled={!$isGM}
-              value={$expedition.wilderness.weather}
-              on:change={(e) => patchWilderness({ weather: e.currentTarget.value })}
-            />
+            Climate / Season
+            <select
+              disabled={!$isGM || weatherReady}
+              value={$expedition.wilderness.climate}
+              on:change={onClimateChange}
+            >
+              {#each CLIMATES as climate}<option value={climate}>{climate}</option>{/each}
+            </select>
           </label>
+          <div>
+            <div class="font-bold">Weather</div>
+            {#if weatherReady}
+              <div class="border rounded px-1 py-0.5 bg-gray-50 min-h-[23px]">
+                {$expedition.wilderness.weather}
+              </div>
+              <div class="text-[9px] text-gray-500 mt-0.5">
+                2d6 {$expedition.wilderness.weatherNaturalRoll}
+                {#if $expedition.wilderness.weatherModifiedRoll !== $expedition.wilderness.weatherNaturalRoll}
+                  → {$expedition.wilderness.weatherModifiedRoll}
+                {/if}
+                · next {$expedition.wilderness.weatherModifier >= 0 ? "+" : ""}{$expedition.wilderness.weatherModifier}
+              </div>
+            {:else}
+              <button
+                class="border rounded px-2 py-1 w-full"
+                disabled={!$isGM}
+                on:click={rollWeather}
+              >
+                Roll Weather
+              </button>
+            {/if}
+          </div>
         </div>
+
+        <div class="mt-2 border rounded-md p-2 bg-gray-50 text-xs">
+          <div class="flex flex-wrap items-end gap-2">
+            <label>
+              Pace
+              <select
+                disabled={!$isGM || paceReady}
+                value={$expedition.wilderness.pace}
+                on:change={onPaceChange}
+              >
+                {#each PACES as pace}<option value={pace}>{pace}</option>{/each}
+              </select>
+            </label>
+            {#if $expedition.wilderness.pace === "Forced"}
+              <label>
+                Travel Quarters
+                <select
+                  disabled={!$isGM || paceReady}
+                  value={$expedition.wilderness.forcedTravelTarget}
+                  on:change={onForcedTravelTargetChange}
+                >
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                </select>
+              </label>
+            {/if}
+            {#if $isGM}
+              {#if paceReady}
+                <button class="border rounded px-2 py-1" on:click={unlockPace}>Unlock Pace</button>
+              {:else}
+                <button
+                  class="bg-black text-white rounded px-2 py-1"
+                  disabled={!weatherReady}
+                  on:click={declarePace}
+                >
+                  Declare Pace
+                </button>
+              {/if}
+            {/if}
+            <div class="ml-auto text-[10px] text-gray-600">
+              {$expedition.wilderness.travelQuartersToday} / {paceTravelTarget} planned travel Quarters today
+            </div>
+          </div>
+          <div class="text-[10px] text-gray-500 mt-1">
+            Cautious: 1 Quarter, Trailblaze/Keep Watch Advantage · Steady: 2 Quarters · Forced: 3–4 Quarters; the 3rd and 4th are Forced March.
+          </div>
+        </div>
+
+        {#if dayMessage}
+          <div class="mt-1 text-[10px] border rounded px-2 py-1 bg-yellow-50">{dayMessage}</div>
+        {/if}
+
+        {#if $expedition.wilderness.weatherExtremeCandidate}
+          <div class="mt-1 text-[10px] border rounded px-2 py-1 bg-yellow-50 flex items-center gap-2">
+            <span>
+              Consecutive 10+ weather: the GM may replace Clear Skies with
+              {$expedition.wilderness.weatherExtremeCandidate}{ $expedition.wilderness.climate === "Tropical" ? " when the hot/dry season supports it" : ""}.
+            </span>
+            {#if $isGM}
+              <button
+                class="bg-black text-white rounded px-2 py-1 whitespace-nowrap"
+                on:click={applyWeatherExtremeCandidate}
+              >
+                Apply
+              </button>
+              <button class="border rounded px-2 py-1 whitespace-nowrap" on:click={keepClearWeather}>Keep Clear</button>
+            {/if}
+          </div>
+        {/if}
+
+        {#if weatherReady && $expedition.wilderness.weatherEffect !== "normal"}
+          <div class="mt-1 text-[10px] border rounded px-2 py-1 bg-gray-50">
+            {#if $expedition.wilderness.weatherEffect === "heavy"}
+              Heavy weather: each Travel Quarter costs +1 Quarter; Trailblaze, Keep Watch, Forage, Hunt, Fish, and Make Camp are at Disadvantage.
+            {:else if $expedition.wilderness.weatherEffect === "severe"}
+              Severe weather: each Travel Quarter usually costs +2 Quarters; Trailblaze/Keep Watch are at Disadvantage; Forage/Hunt/Fish are Unavailable; travel or Make Camp may be impossible when the fiction supports it.
+            {:else if $expedition.wilderness.weatherEffect === "cold-snap"}
+              Cold Snap: Forage and Hunt are at Disadvantage; Fish is Normal if usable fishable water remains accessible. Exposed travelers may suffer weather Fatigue.
+            {:else}
+              Heat Wave: Forage and Hunt are at Disadvantage; Fish is Normal if usable fishable water remains accessible. Treat as Extreme Heat for Water Usage.
+            {/if}
+          </div>
+        {/if}
 
         <div class="mt-2 text-xs">
           <div class="font-bold mb-0.5">Journey</div>
@@ -594,7 +1044,7 @@
               <div>
                 <div class="font-bold text-xs">Resolve Quarter</div>
                 <div class="text-[10px] text-gray-500">
-                  First resolver pass: Attribute, Wilderness Craft Rank, terrain pressure, and activity outcomes. Pace, Weather, Forced March, Events, and supply consumption come next.
+                  Pace, Weather, terrain pressure, Wilderness Craft, and Forced March are active. Wilderness Events and supply consumption come next.
                 </div>
               </div>
               <button class="bg-black text-white rounded-md px-3 py-1 text-xs" on:click={planQuarterResolution}>
@@ -621,7 +1071,8 @@
                     {#if task.response?.roll}
                       <div class="mt-1">
                         {task.response.characterName}: {task.response.attribute} {task.response.target},
-                        WC R{task.response.skillRank}, modifier {task.response.modifier >= 0 ? "+" : ""}{task.response.modifier},
+                        {#if task.response.skillRank !== undefined}WC R{task.response.skillRank}, {/if}
+                        modifier {task.response.modifier >= 0 ? "+" : ""}{task.response.modifier},
                         {task.response.mode}.
                         <span class:font-bold={task.response.roll.success}>
                           d20 {task.response.roll.natural} → {task.response.roll.total}
@@ -643,6 +1094,13 @@
                   </div>
                 {/each}
               </div>
+
+              {#if forcedMarchFailures.length}
+                <div class="mt-2 border border-red-300 bg-red-50 rounded-md p-2 text-[10px] text-red-800">
+                  Forced March failure: {forcedMarchFailures.map((task) => task.playerName).join(", ")} gained 1 Fatigue and cannot travel another Quarter today.
+                  The rules require the Company to halt or continue without the failed traveler. Company splitting is not automated yet, so Quarter completion is blocked here rather than silently choosing for you.
+                </div>
+              {/if}
 
               <button
                 class="mt-2 rounded-md px-3 py-1 text-xs"

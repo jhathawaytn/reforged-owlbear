@@ -15,9 +15,10 @@ export type ExpeditionRollKind =
   | "Forage for Water"
   | "Hunt"
   | "Fish"
-  | "Make Camp";
+  | "Make Camp"
+  | "Forced March";
 
-export type ExpeditionAttributeMode = "INT" | "HIGHER_INT_DEX" | "INT_OR_STR";
+export type ExpeditionAttributeMode = "INT" | "STR" | "HIGHER_INT_DEX" | "INT_OR_STR";
 
 export type ExpeditionRollRequest = {
   requestId: string;
@@ -25,6 +26,10 @@ export type ExpeditionRollRequest = {
   kind: ExpeditionRollKind;
   attributeMode: ExpeditionAttributeMode;
   baseModifier: number;
+  useWildernessCraft: boolean;
+  hasAdvantage: boolean;
+  hasDisadvantage: boolean;
+  applyFailureFatigue: boolean;
   requestedBy: string;
   note?: string;
 };
@@ -43,6 +48,7 @@ export type ExpeditionRollResponse = {
   mode?: SaveRollMode;
   roll?: SaveRollResult;
   outcome?: string;
+  fatigueApplied?: boolean;
 };
 
 export const PendingExpeditionRollStore = writable<ExpeditionRollRequest | null>(null);
@@ -68,18 +74,30 @@ function wildernessCraftRank(): number {
 function attributeFor(request: ExpeditionRollRequest, choice?: "INT" | "STR"): Attribute {
   const pc = get(PlayerCharacterStore);
   if (request.attributeMode === "INT") return "INT";
+  if (request.attributeMode === "STR") return "STR";
   if (request.attributeMode === "HIGHER_INT_DEX") {
     return pc.attributes.INT >= pc.attributes.DEX ? "INT" : "DEX";
   }
   return choice ?? "INT";
 }
 
-function modeFor(rank: number): SaveRollMode {
-  // Ch.11: PCs with no Wilderness Craft roll these wilderness tasks with Disadvantage.
-  return rank === 0 ? "disadvantage" : "normal";
+function rollModeFor(request: ExpeditionRollRequest, rank: number): SaveRollMode {
+  const hasAdvantage = request.hasAdvantage;
+  const hasDisadvantage =
+    request.hasDisadvantage || (request.useWildernessCraft && rank === 0);
+
+  if (hasAdvantage && hasDisadvantage) return "normal";
+  if (hasAdvantage) return "advantage";
+  if (hasDisadvantage) return "disadvantage";
+  return "normal";
 }
 
 async function outcomeFor(kind: ExpeditionRollKind, roll: SaveRollResult): Promise<string> {
+  if (kind === "Forced March") {
+    return roll.success
+      ? "Forced March succeeds; traveler may complete this Quarter."
+      : "Forced March fails: +1 Fatigue and this traveler cannot travel another Quarter today.";
+  }
   if (kind === "Trailblaze") {
     const pieces = [roll.success ? "Quarter progress succeeds." : "Quarter spent; no progress."];
     if (roll.natural === 1) pieces.push("Natural 1: Travel Boon.");
@@ -157,12 +175,19 @@ export async function resolvePendingExpeditionRoll(choice?: "INT" | "STR"): Prom
   if (request.attributeMode === "INT_OR_STR" && !choice) return null;
 
   const pc = get(PlayerCharacterStore);
-  const rank = wildernessCraftRank();
+  const rank = request.useWildernessCraft ? wildernessCraftRank() : 0;
   const attribute = attributeFor(request, choice);
-  const modifier = request.baseModifier - rank * 2;
-  const mode = modeFor(rank);
+  const modifier = request.baseModifier - (request.useWildernessCraft ? rank * 2 : 0);
+  const mode = rollModeFor(request, rank);
   const roll = await rollReforgedSave(pc.attributes[attribute], modifier, mode, "everyone");
   const outcome = await outcomeFor(request.kind, roll);
+
+  let fatigueApplied = false;
+  if (request.applyFailureFatigue && !roll.success) {
+    PlayerCharacterStore.set({ ...pc, fatigue: (pc.fatigue ?? 0) + 1 });
+    fatigueApplied = true;
+  }
+
   const response: ExpeditionRollResponse = {
     requestId: request.requestId,
     targetPlayerId: request.targetPlayerId,
@@ -172,11 +197,12 @@ export async function resolvePendingExpeditionRoll(choice?: "INT" | "STR"): Prom
     characterName: pc.name || (await OBR.player.getName()),
     attribute,
     target: pc.attributes[attribute],
-    skillRank: rank,
+    skillRank: request.useWildernessCraft ? rank : undefined,
     modifier,
     mode,
     roll,
     outcome,
+    fatigueApplied,
   };
 
   PendingExpeditionRollStore.set(null);

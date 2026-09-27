@@ -6,6 +6,13 @@ export type TravelQuarter = "Morning" | "Day" | "Evening" | "Night";
 export type RouteMode = "Known Route" | "Unmapped Country";
 export type TravelPace = "Cautious" | "Steady" | "Forced";
 export type TravelTerrain = "Open" | "Broken" | "Difficult" | "Severe";
+export type TravelClimate =
+  | "Cold / Winter"
+  | "Temperate Spring / Fall"
+  | "Temperate Summer"
+  | "Tropical"
+  | "Desert / Arid";
+export type TravelWeatherEffect = "normal" | "heavy" | "severe" | "cold-snap" | "heat-wave";
 
 export type WildernessActivity =
   | "Travel"
@@ -30,8 +37,19 @@ export type WildernessExpeditionState = {
   quarter: TravelQuarter;
   routeMode: RouteMode;
   pace: TravelPace;
+  paceDeclaredDay: number;
+  forcedTravelTarget: 3 | 4;
   terrain: TravelTerrain;
+  climate: TravelClimate;
   weather: string;
+  weatherEffect: TravelWeatherEffect;
+  weatherModifier: number;
+  weatherNaturalRoll: number;
+  weatherModifiedRoll: number;
+  weatherRolledDay: number;
+  weatherExtremeCandidate: "" | "Cold Snap" | "Heat Wave";
+  travelQuartersToday: number;
+  forcedMarchStoppedPlayerIds: string[];
   currentLocation: string;
   destination: string;
   progress: number;
@@ -61,8 +79,19 @@ export const defaultExpeditionState = (): ExpeditionState => ({
     quarter: "Morning",
     routeMode: "Unmapped Country",
     pace: "Steady",
+    paceDeclaredDay: 0,
+    forcedTravelTarget: 3,
     terrain: "Open",
+    climate: "Temperate Spring / Fall",
     weather: "Not rolled",
+    weatherEffect: "normal",
+    weatherModifier: 0,
+    weatherNaturalRoll: 0,
+    weatherModifiedRoll: 0,
+    weatherRolledDay: 0,
+    weatherExtremeCandidate: "",
+    travelQuartersToday: 0,
+    forcedMarchStoppedPlayerIds: [],
     currentLocation: "",
     destination: "",
     progress: 0,
