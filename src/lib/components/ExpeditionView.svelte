@@ -32,10 +32,19 @@
   const ROLES: WildernessRole[] = ["Trailblazer", "Keep Watch", "Quartermaster"];
 
   $: company = $PartyStore.map((p) => ({ id: p.id, name: p.name }));
+  $: currentAssignments = $expedition.wilderness.assignments;
   $: assignedCompany = company.map((member) => ({
     member,
-    assignment: assignmentFor(member.id),
+    assignment: currentAssignments.find((a) => a.playerId === member.id) ?? {
+      playerId: member.id,
+      activity: "Travel" as WildernessActivity,
+    },
   }));
+  $: roleHolders = {
+    Trailblazer: currentAssignments.find((a) => a.role === "Trailblazer"),
+    "Keep Watch": currentAssignments.find((a) => a.role === "Keep Watch"),
+    Quartermaster: currentAssignments.find((a) => a.role === "Quartermaster"),
+  };
   $: haltsForActivity = assignedCompany.some(({ assignment }) =>
     ["Forage for Food", "Forage for Water", "Hunt", "Fish"].includes(assignment.activity),
   );
@@ -75,7 +84,7 @@
 
   function assignmentFor(playerId: string): ExpeditionAssignment {
     return (
-      $expedition.wilderness.assignments.find((a) => a.playerId === playerId) ?? {
+      currentAssignments.find((a) => a.playerId === playerId) ?? {
         playerId,
         activity: "Travel",
       }
@@ -88,7 +97,7 @@
   }
 
   function roleHolder(role: WildernessRole): ExpeditionAssignment | undefined {
-    return $expedition.wilderness.assignments.find((a) => a.role === role);
+    return roleHolders[role];
   }
 
   function membersForActivity(activity: WildernessActivity): { member: CompanyMember; assignment: ExpeditionAssignment }[] {
