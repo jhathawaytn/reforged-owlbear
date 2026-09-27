@@ -2,7 +2,7 @@
   import Modal from "./Modal.svelte";
   import { stepWeaponDie } from "../types";
   import type { Attack, GearItem } from "../types";
-  import { parseAndRoll } from "../utils";
+  import { rollNotation } from "../services/DicePlus";
   import { notify } from "../services/Notifier";
 
   // One instance per Attack row, matching WeaponStressButton's pattern -
@@ -63,13 +63,13 @@
     return { notation: attack.roll, broken: true };
   }
 
-  function rollDamage() {
+  async function rollDamage() {
     const { notation, broken } = effectiveRoll();
     if (broken) {
       notify(`${attack.name || "Attack"}: Broken - no normal damage, can't Gambit.`);
       return;
     }
-    const result = parseAndRoll(notation);
+    const result = await rollNotation(notation);
     if (!result) {
       notify(`${attack.name || "Attack"}: couldn't parse "${notation}"`);
       return;

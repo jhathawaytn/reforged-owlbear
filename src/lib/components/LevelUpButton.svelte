@@ -2,7 +2,7 @@
   import { PlayerCharacterStore as pc, levelUpAvailable } from "../model/ReforgedCharacter";
   import { ATTRIBUTES, attributeGrows, lowestAttributes, titleForLevel } from "../types";
   import type { Attribute } from "../types";
-  import { rollDieSides } from "../utils";
+  import { rollDiceValues, rollNotation } from "../services/DicePlus";
   import { notify } from "../services/Notifier";
   import Modal from "./Modal.svelte";
 
@@ -55,23 +55,28 @@
   // Tempered (Scar 12, §14.2): the next HP Growth rolls twice and keeps the
   // higher result, then the benefit is spent - consumed here, at the roll,
   // not deferred to Confirm.
-  function rollHP() {
+  async function rollHP() {
     beforeMaxHP = $pc.maxHitPoints;
     beforeHP = $pc.hitPoints;
     if ($pc.temperedPending) {
-      hpRoll = Math.max(rollDieSides(6), rollDieSides(6));
+      const rolls = await rollDiceValues(2, 6);
+      hpRoll = Math.max(...rolls);
       hpRollTempered = true;
       $pc.temperedPending = false;
     } else {
-      hpRoll = rollDieSides(6);
+      const result = await rollNotation("d6");
+      hpRoll = result?.total ?? 1;
     }
   }
 
-  function rollAttributes() {
+  async function rollAttributes() {
     const before = { ...$pc.attributes };
     const beforeMax = { ...$pc.attributeMax };
     const next = {} as Record<Attribute, number>;
-    for (const a of ATTRIBUTES) next[a] = rollDieSides(6) + rollDieSides(6) + rollDieSides(6);
+    for (const a of ATTRIBUTES) {
+      const result = await rollNotation("3d6");
+      next[a] = result?.total ?? 3;
+    }
     beforeAttributes = before;
     beforeAttributeMax = beforeMax;
     attrRolls = next;

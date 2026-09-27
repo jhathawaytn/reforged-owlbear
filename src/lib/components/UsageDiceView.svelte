@@ -2,7 +2,7 @@
   import { PlayerCharacterStore as pc } from "../model/ReforgedCharacter";
   import { DIE_SIDES, stepDownDie } from "../types";
   import type { GearItem, UsageDieState } from "../types";
-  import { rollDieSides } from "../utils";
+  import { rollSingleDie } from "../services/DicePlus";
   import { notify } from "../services/Notifier";
   import DieIcon from "./DieIcon.svelte";
 
@@ -14,10 +14,10 @@
     return `${item.name} #${matches.findIndex((g) => g.id === item.id) + 1}`;
   }
 
-  function checkUsageDie(item: GearItem) {
+  async function checkUsageDie(item: GearItem) {
     if (!item.usageDie || item.usageDie === "depleted") return;
     const sides = DIE_SIDES[item.usageDie];
-    const roll = rollDieSides(sides);
+    const roll = await rollSingleDie(sides);
     if (roll <= 3) {
       const before = item.usageDie;
       const stepped: UsageDieState = stepDownDie(item.usageDie);

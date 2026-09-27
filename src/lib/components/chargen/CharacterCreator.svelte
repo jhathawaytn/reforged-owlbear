@@ -3,8 +3,8 @@
   import SkillsTalentsPicker from "../SkillsTalentsPicker.svelte";
   import { PlayerCharacterStore as pc, careerPicksTotal, careerPicksSpent, ageXPDelta } from "../../model/ReforgedCharacter";
   import { applyStartingKit } from "../../compendium";
-  import { rollDieSides } from "../../utils";
-  import { rollD66Trait } from "../../definingTraits";
+  import { rollDiceValues, rollNotation, rollSingleDie } from "../../services/DicePlus";
+  import { DEFINING_TRAITS } from "../../definingTraits";
   import { CAREER_NAMES, CAREERS } from "../../careers";
   import type { CareerName } from "../../careers";
   import { CAREER_QUESTIONNAIRES } from "../../careerQuestionnaires";
@@ -24,17 +24,16 @@
 
   $: locked = $pc.characterCreationFinalized;
 
-  function roll2d6plus3(): number {
-    return rollDieSides(6) + rollDieSides(6) + 3;
-  }
-
   // 1. Attributes - roll once, one optional swap. attributeMax is kept
   // identical to attributes throughout Character Creation (see types.ts) -
   // nothing has reduced or grown it yet, so there's no gap between them.
-  function rollAttributes() {
+  async function rollAttributes() {
     if ($pc.attributesRolled || locked) return;
     const next = { ...$pc.attributes };
-    for (const attr of ATTRIBUTES) next[attr] = roll2d6plus3();
+    for (const attr of ATTRIBUTES) {
+      const result = await rollNotation("2d6+3");
+      next[attr] = result?.total ?? 5;
+    }
     $pc.attributes = next;
     $pc.attributeMax = { ...next };
     $pc.attributesRolled = true;
@@ -49,9 +48,9 @@
   }
 
   // 2. Hit Protection - roll once
-  function rollHP() {
+  async function rollHP() {
     if ($pc.hpRolled || locked) return;
-    const roll = rollDieSides(6);
+    const roll = await rollSingleDie(6);
     $pc.hitPoints = roll;
     $pc.maxHitPoints = roll;
     $pc.hpRolled = true;
@@ -63,8 +62,8 @@
   function setAge(newAge: Age) {
     $pc = { ...$pc, age: newAge, ...ageXPDelta($pc, newAge) };
   }
-  function rollAge() {
-    setAge(AGE_BY_ROLL[rollDieSides(6)]);
+  async function rollAge() {
+    setAge(AGE_BY_ROLL[await rollSingleDie(6)]);
   }
   // Applying the Attribute Adjustment is a separate, one-time action (unlike
   // the XP delta above, a floor/ceiling-clamped Attribute change can't be
@@ -80,15 +79,17 @@
   }
 
   // 4. Defining Trait - roll once, one reroll only if rolled
-  function rollTrait() {
+  async function rollTrait() {
     if ($pc.definingTraitRolled || locked) return;
-    const t = rollD66Trait(rollDieSides);
+    const dice = await rollDiceValues(2, 6);
+    const t = DEFINING_TRAITS[dice[0] * 10 + dice[1]];
     $pc.definingTrait = `${t.name} - ${t.text}`;
     $pc.definingTraitRolled = true;
   }
-  function rerollTrait() {
+  async function rerollTrait() {
     if (!$pc.definingTraitRolled || $pc.definingTraitRerollUsed || locked) return;
-    const t = rollD66Trait(rollDieSides);
+    const dice = await rollDiceValues(2, 6);
+    const t = DEFINING_TRAITS[dice[0] * 10 + dice[1]];
     $pc.definingTrait = `${t.name} - ${t.text}`;
     $pc.definingTraitRerollUsed = true;
   }

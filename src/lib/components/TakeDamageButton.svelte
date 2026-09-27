@@ -2,10 +2,11 @@
   import Modal from "./Modal.svelte";
   import RollButton from "./RollButton.svelte";
   import { PlayerCharacterStore as pc, totalArmor, resolveDeflectStep, canUseTechnique, useTechnique } from "../model/ReforgedCharacter";
-  import { hasArmorProperty, rollScar, rollInjurySite, SCAR_TABLE, DAMAGE_TYPES } from "../types";
+  import { hasArmorProperty, INJURY_SITE_TABLE, SCAR_TABLE, DAMAGE_TYPES } from "../types";
   import type { Attack, DamageType, DieSize, GearItem, InjuryLocation, InjurySeverity } from "../types";
   import { DIE_SIDES } from "../types";
-  import { newId, parseAndRoll, rollDieSides } from "../utils";
+  import { newId } from "../utils";
+  import { rollNotation, rollSingleDie } from "../services/DicePlus";
   import { notify } from "../services/Notifier";
   import type { SaveRollResult } from "../utils";
 
@@ -119,8 +120,8 @@
     phase = r === "Parry" ? "parry" : "entry";
   }
 
-  function rollBlockDodgeDie() {
-    damage = rollDieSides(4);
+  async function rollBlockDodgeDie() {
+    damage = await rollSingleDie(4);
     log(`${reaction}: replaces the attacker's weapon die - rolled 1d4 = ${damage}.`);
   }
 
@@ -137,9 +138,9 @@
   // weapon damage, the higher result wins, and the loser takes the winner's
   // roll straight to STR - ignoring Armor and HP, and never causing a
   // Mortal Wound, Scar, or Critical Save. A tie is no exchange. ----
-  function rollParryDefense() {
+  async function rollParryDefense() {
     if (parrySelectedAttack) {
-      const result = parseAndRoll(parrySelectedAttack.roll);
+      const result = await rollNotation(parrySelectedAttack.roll);
       if (!result) {
         notify(`Parry: couldn't parse "${parrySelectedAttack.roll}" - enter a number by hand instead.`);
         return;
@@ -310,9 +311,9 @@
     phase = "criticalSave";
   }
 
-  function onCriticalSaveRolled(e: CustomEvent<SaveRollResult>) {
+  async function onCriticalSaveRolled(e: CustomEvent<SaveRollResult>) {
     if (!e.detail.success) {
-      const site = rollInjurySite(rollDieSides);
+      const site = INJURY_SITE_TABLE[(await rollSingleDie(10)) - 1];
       addInjury("Severe", site.location, `Critical Damage - ${site.site}`);
       log(`Critical STR Save failed: Severe ${site.location} Injury (${site.site}).`);
     } else {
@@ -328,11 +329,12 @@
   // ---- Scar (§14.2) - HP emptied to exactly 0 with no overflow. Attribute
   // loss here is NOT Damage: no Critical Save, no Mortal Wound, no further
   // Scar - only reaching STR 0 still resolves as Slain. ----
-  function rollTheScar() {
-    const { roll, entry } = rollScar(DIE_SIDES[dieSize], rollDieSides);
+  async function rollTheScar() {
+    const roll = await rollSingleDie(DIE_SIDES[dieSize]);
+    const entry = SCAR_TABLE[roll - 1];
     scarResult = entry;
     log(`Scar (d${DIE_SIDES[dieSize]}): rolled ${roll} - ${entry.name}. ${entry.effect}`);
-    applyScar(entry.roll);
+    await applyScar(entry.roll);
   }
 
   function applyScarAttributeLoss(attr: "STR" | "WIL", amount: number) {
@@ -345,17 +347,17 @@
     }
   }
 
-  function applyScar(roll: number, replacedDoom = false) {
+  async function applyScar(roll: number, replacedDoom = false) {
     switch (roll) {
       case 1:
-        applyScarAttributeLoss("WIL", rollDieSides(6));
+        applyScarAttributeLoss("WIL", await rollSingleDie(6));
         break;
       case 2:
         applyScarAttributeLoss("WIL", 1);
         log("Gain a permanent visible mark appropriate to the blow (record it in Notes).");
         break;
       case 3:
-        applyScarAttributeLoss("STR", rollDieSides(4));
+        applyScarAttributeLoss("STR", await rollSingleDie(4));
         break;
       case 4:
         $pc.fatigue += 1;
@@ -363,10 +365,10 @@
         log("Gain 1 Fatigue; next Action is Impaired (clear that flag by hand once it's used).");
         break;
       case 5:
-        applyScarAttributeLoss("STR", rollDieSides(6));
+        applyScarAttributeLoss("STR", await rollSingleDie(6));
         break;
       case 6: {
-        const site = rollInjurySite(rollDieSides);
+        const site = INJURY_SITE_TABLE[(await rollSingleDie(10)) - 1];
         addInjury("Light", site.location, `Scar: Gouge - ${site.site}`);
         log(`Light ${site.location} Injury (${site.site}).`);
         break;
@@ -376,17 +378,17 @@
         log("Severe Head Injury.");
         break;
       case 8: {
-        const site = rollInjurySite(rollDieSides);
+        const site = INJURY_SITE_TABLE[(await rollSingleDie(10)) - 1];
         addInjury("Severe", site.location, `Scar: Tear - ${site.site}`);
         log(`Severe ${site.location} Injury (${site.site}).`);
         break;
       }
       case 9:
-        applyScarAttributeLoss("STR", rollDieSides(4));
-        applyScarAttributeLoss("WIL", rollDieSides(4));
+        applyScarAttributeLoss("STR", await rollSingleDie(4));
+        applyScarAttributeLoss("WIL", await rollSingleDie(4));
         break;
       case 10: {
-        const site = rollInjurySite(rollDieSides);
+        const site = INJURY_SITE_TABLE[(await rollSingleDie(10)) - 1];
         addInjury("Permanent", site.location, `Scar: Mutilation - ${site.site}`);
         log(`Permanent ${site.location} Injury (${site.site}).`);
         break;
@@ -415,11 +417,11 @@
     phase = "resolved";
   }
 
-  function useHelmSacrifice(item: GearItem) {
+  async function useHelmSacrifice(item: GearItem) {
     sacrifice(item);
     log(`Helm Sacrifice: destroyed ${item.name} to suffer Agony instead of Doom.`);
     scarResult = { ...SCAR_TABLE[8], name: "Agony (via Helm Sacrifice)" };
-    applyScar(9, true);
+    await applyScar(9, true);
   }
 </script>
 

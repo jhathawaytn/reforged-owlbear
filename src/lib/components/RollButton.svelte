@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
-  import { rollSave } from "../utils";
   import type { SaveRollMode, SaveRollResult } from "../utils";
+  import { rollReforgedSave } from "../services/DicePlus";
   import Menu from "./Menu/Menu.svelte";
   import MenuOption from "./Menu/MenuOption.svelte";
   import { notify } from "../services/Notifier";
@@ -47,23 +47,23 @@
     return `${label} Save${mode !== "normal" ? ` (${mode})` : ""}: rolled ${rollNote}${modNote} -> ${outcome}`;
   }
 
-  function roll() {
-    const r = rollSave(target, modifier, "normal");
+  async function roll() {
+    const r = await rollReforgedSave(target, modifier, "normal");
     notify(formatMsg(r, "normal"));
     dispatch("rolled", r);
   }
-  function rollWithAdvantage() {
-    const r = rollSave(target, modifier, "advantage");
+  async function rollWithAdvantage() {
+    const r = await rollReforgedSave(target, modifier, "advantage");
     notify(formatMsg(r, "advantage"));
     dispatch("rolled", r);
   }
-  function rollWithDisadvantage() {
-    const r = rollSave(target, modifier, "disadvantage");
+  async function rollWithDisadvantage() {
+    const r = await rollReforgedSave(target, modifier, "disadvantage");
     notify(formatMsg(r, "disadvantage"));
     dispatch("rolled", r);
   }
-  function rollSecretly() {
-    const r = rollSave(target, modifier, "normal");
+  async function rollSecretly() {
+    const r = await rollReforgedSave(target, modifier, "normal", "gm_only");
     notify(formatMsg(r, "normal"), { secret: true });
     dispatch("rolled", r);
   }

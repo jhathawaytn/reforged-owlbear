@@ -11,7 +11,7 @@
   import { PlayerCharacterStore as pc } from "../model/ReforgedCharacter";
   import { degradeCondition, stepWeaponDie } from "../types";
   import type { Attack, GearItem } from "../types";
-  import { parseAndRoll } from "../utils";
+  import { rollNotation } from "../services/DicePlus";
   import { notify } from "../services/Notifier";
   import Menu from "./Menu/Menu.svelte";
   import MenuOption from "./Menu/MenuOption.svelte";
@@ -41,14 +41,14 @@
     return { notation: attack.roll, broken: true };
   }
 
-  function applyStress(option: string, brutalSteps = 1) {
+  async function applyStress(option: string, brutalSteps = 1) {
     close();
     const steps = option === "Brutal" ? brutalSteps : 1;
     for (let i = 0; i < steps; i++) degradeCondition(gear);
     $pc.gear = $pc.gear;
 
     if (option === "Cleaving") {
-      const result = parseAndRoll("d4");
+      const result = await rollNotation("d4");
       notify(
         `${attack.name || "Attack"}: Cleaving Stress - ${gear.name} degrades 1 step, one Impaired attack (d4) against another target in reach (no chain): ${result?.breakdown ?? "?"}.`,
       );
@@ -60,7 +60,7 @@
       notify(`${attack.name || "Attack"}: Broken - no normal damage.`);
       return;
     }
-    const result = parseAndRoll(notation);
+    const result = await rollNotation(notation);
     if (!result) {
       notify(`${attack.name || "Attack"}: couldn't parse "${notation}"`);
       return;

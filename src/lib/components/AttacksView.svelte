@@ -1,6 +1,7 @@
 <script lang="ts">
   import { PlayerCharacterStore as pc, canUseTechnique, useTechnique } from "../model/ReforgedCharacter";
-  import { newId, parseAndRoll } from "../utils";
+  import { newId } from "../utils";
+  import { rollNotation } from "../services/DicePlus";
   import { notify } from "../services/Notifier";
   import { stepWeaponDie, stepWeaponDieUp } from "../types";
   import type { Attack, GearItem } from "../types";
@@ -28,13 +29,13 @@
     return { notation: a.roll, broken: true };
   }
 
-  function rollAttack(a: Attack) {
+  async function rollAttack(a: Attack) {
     const { notation, broken } = effectiveRoll(a);
     if (broken) {
       notify(`${a.name || "Attack"}: Broken - no normal damage.`);
       return;
     }
-    const result = parseAndRoll(notation);
+    const result = await rollNotation(notation);
     if (!result) {
       notify(`${a.name || "Attack"}: couldn't parse "${notation}" (try e.g. d6, 2d6+1)`);
       return;
@@ -45,7 +46,7 @@
   // Act Decisively (§13.6, Initiative only): step the die UP one size before
   // rolling. This is a one-time boost for this Action only - a.roll itself
   // never changes.
-  function rollActDecisively(a: Attack) {
+  async function rollActDecisively(a: Attack) {
     if (!canUseTechnique($pc, "Act Decisively")) return;
     const { notation, broken } = effectiveRoll(a);
     if (broken) {
@@ -53,7 +54,7 @@
       return;
     }
     const stepped = stepWeaponDieUp(notation);
-    const result = parseAndRoll(stepped);
+    const result = await rollNotation(stepped);
     if (!result) {
       notify(`${a.name || "Attack"}: couldn't parse "${stepped}"`);
       return;
@@ -66,15 +67,15 @@
   // Tactical Consideration (§13.6, Clash only): reroll one of your own dice,
   // must keep the second result - resolved here as rolling twice and only
   // reporting the kept (second) roll.
-  function rollTacticalConsideration(a: Attack) {
+  async function rollTacticalConsideration(a: Attack) {
     if (!canUseTechnique($pc, "Tactical Consideration")) return;
     const { notation, broken } = effectiveRoll(a);
     if (broken) {
       notify(`${a.name || "Attack"}: Broken - no normal damage.`);
       return;
     }
-    const first = parseAndRoll(notation);
-    const second = parseAndRoll(notation);
+    const first = await rollNotation(notation);
+    const second = await rollNotation(notation);
     if (!first || !second) {
       notify(`${a.name || "Attack"}: couldn't parse "${notation}"`);
       return;

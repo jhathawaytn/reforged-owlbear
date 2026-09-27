@@ -2,7 +2,7 @@
   import { PlayerCharacterStore as pc } from "../model/ReforgedCharacter";
   import { CAREER_QUESTIONNAIRES } from "../careerQuestionnaires";
   import type { CareerName } from "../careers";
-  import { rollDieSides } from "../utils";
+  import { rollSingleDie } from "../services/DicePlus";
 
   export let career: CareerName;
 
@@ -36,15 +36,15 @@
   function setRoll(beat: BeatKey, roll: number) {
     updateBeat(beat, { roll, applied: false });
   }
-  function rollBeat(beat: BeatKey) {
-    setRoll(beat, rollDieSides(6));
+  async function rollBeat(beat: BeatKey) {
+    setRoll(beat, await rollSingleDie(6));
   }
   function setDetail(beat: BeatKey, detail: string) {
     updateBeat(beat, { detail });
   }
-  function reroll(beat: BeatKey) {
+  async function reroll(beat: BeatKey) {
     if (!$pc.questionnaire || $pc.questionnaire.rerollUsed) return;
-    rollBeat(beat);
+    await rollBeat(beat);
     $pc.questionnaire = { ...$pc.questionnaire, rerollUsed: true };
   }
 

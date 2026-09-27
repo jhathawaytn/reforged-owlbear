@@ -4,7 +4,8 @@
 // gear, not personal Inventory) or the full Quality/Condition/Stress rules.
 
 import { get } from "svelte/store";
-import { newId, parseAndRoll } from "./utils";
+import { newId } from "./utils";
+import { rollNotation } from "./services/DicePlus";
 import type { GearItem, GearZone, ReforgedCharacter } from "./types";
 import type { UndoRedoStore } from "./services/PlayerHistoryTracker";
 import { notify } from "./services/Notifier";
@@ -252,14 +253,14 @@ export const STARTING_KIT_ITEM_NAMES = ["Backpack", "Trail Rations", "Waterskin"
 // Shared by the Gear box's "+ Starting Kit" button and the Character
 // Creator's Starting Equipment step - adds the kit above plus rolls
 // 3d6x10 Silver Pennies.
-export function applyStartingKit(pc: UndoRedoStore<ReforgedCharacter>): void {
+export async function applyStartingKit(pc: UndoRedoStore<ReforgedCharacter>): Promise<void> {
   const current = get(pc);
   if (current.startingKitApplied || current.characterCreationFinalized) return;
 
   const items = STARTING_KIT_ITEM_NAMES.map((name) => COMPENDIUM.find((i) => i.name === name)).filter(
     (i): i is CompendiumItem => !!i,
   );
-  const roll = parseAndRoll("3d6");
+  const roll = await rollNotation("3d6");
   const sp = roll ? roll.total * 10 : 0;
   pc.set({
     ...current,

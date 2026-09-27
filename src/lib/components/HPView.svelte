@@ -3,7 +3,7 @@
   import { notify } from "../services/Notifier";
   import { ATTRIBUTES, DIE_SIDES, stepDownDie } from "../types";
   import type { Attribute, UsageDieState } from "../types";
-  import { rollDieSides } from "../utils";
+  import { rollSingleDie } from "../services/DicePlus";
   import TakeDamageButton from "./TakeDamageButton.svelte";
 
   // Overburdened (Appendix A): "your HP is immediately reduced to 0... while
@@ -32,7 +32,7 @@
   // accessible Water stock -> Deprived, cannot Catch Your Breath. This is
   // also the only way Strain clears (besides Rest/Sleep, below), so a
   // successful Catch Your Breath clears it too.
-  function catchYourBreath(label = "Catch Your Breath") {
+  async function catchYourBreath(label = "Catch Your Breath") {
     const waterItem = $pc.gear.find((g) => g.usageKind === "Water" && g.usageDie && g.usageDie !== "depleted");
 
     if (!waterItem) {
@@ -41,7 +41,7 @@
     }
 
     const size = waterItem.usageDie as Exclude<UsageDieState, "depleted">;
-    const roll = rollDieSides(DIE_SIDES[size]);
+    const roll = await rollSingleDie(DIE_SIDES[size]);
     let waterNote: string;
     if (roll <= 3) {
       const stepped = stepDownDie(size);
@@ -81,7 +81,7 @@
   // full night's rest" - modeled as an accessible Medical Usage Die stock,
   // gated the same way Water gates Catch Your Breath. Perilous Rest isn't a
   // full night's rest, so it doesn't heal Light Injuries either.
-  function healLightInjuries() {
+  async function healLightInjuries() {
     const medItem = $pc.gear.find((g) => g.usageKind === "Medical" && g.usageDie && g.usageDie !== "depleted");
     const lightInjuries = $pc.injuries.filter((i) => i.severity === "Light");
     if (!lightInjuries.length) return;
@@ -90,7 +90,7 @@
       return;
     }
     const size = medItem.usageDie as Exclude<UsageDieState, "depleted">;
-    const roll = rollDieSides(DIE_SIDES[size]);
+    const roll = await rollSingleDie(DIE_SIDES[size]);
     if (roll <= 3) {
       const stepped = stepDownDie(size);
       medItem.usageDie = stepped;
@@ -100,16 +100,16 @@
     notify(`Rest: ${medItem.name} treats ${lightInjuries.length} Light Injury(ies) - healed.`);
   }
 
-  function restOrSleep() {
+  async function restOrSleep() {
     const hadWater = $pc.gear.some((g) => g.usageKind === "Water" && g.usageDie && g.usageDie !== "depleted");
-    catchYourBreath(`${restQuality} Rest`);
+    await catchYourBreath(`${restQuality} Rest`);
     if (hadWater && restQuality !== "Perilous") {
       if ($pc.fatigue > 0) {
         const cleared = $pc.fatigue;
         $pc.fatigue = 0;
         notify(`${restQuality} Rest: ${cleared} Fatigue removed.`);
       }
-      healLightInjuries();
+      await healLightInjuries();
       if (restQuality === "Comfortable" && lostAttributes.includes(restoreAttr)) {
         const before = $pc.attributes[restoreAttr];
         $pc.attributes = { ...$pc.attributes, [restoreAttr]: before + 1 };
