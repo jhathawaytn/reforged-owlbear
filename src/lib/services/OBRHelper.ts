@@ -23,8 +23,17 @@ export function pluginId(s: string) {
   return `${PLUGIN_ID}/${s}`;
 }
 
+export type ReforgedPresence = {
+  id: string;
+  connectionId: string;
+  name: string;
+  role: "GM" | "PLAYER";
+  lastSeen: number;
+};
+
 export const isGM = writable(false);
 export const PartyStore = writable<Player[]>([]);
+export const ReforgedPresenceStore = writable<ReforgedPresence[]>([]);
 export const TrackedPlayer = writable<string>();
 export const GmId = writable<string>();
 export const GmPlayer = writable<Player>();
@@ -46,6 +55,7 @@ export async function init() {
     subscribeToRoomNotifications();
     subscribeToHPNudges();
     initPartyPresence();
+    initReforgedPresence();
     initExpeditionRolls();
     await initExpeditionStore();
 
@@ -94,6 +104,83 @@ export async function sendHPNudge(targetPlayerId: string, delta: number, reason:
   const fromName = await OBR.player.getName();
   const nudge: HPNudge = { targetPlayerId, delta, reason, fromName };
   OBR.broadcast.sendMessage(HP_NUDGE_KEY, nudge);
+}
+
+
+const PRESENCE_KEY = pluginId("presence");
+type PresenceMessage = {
+  type: "hello" | "announce";
+  id: string;
+  connectionId: string;
+  name: string;
+  role: "GM" | "PLAYER";
+  timestamp: number;
+};
+
+function upsertReforgedPresence(message: PresenceMessage) {
+  ReforgedPresenceStore.update((current) => {
+    const next = current.filter(
+      (entry) => !(entry.id === message.id && entry.connectionId === message.connectionId),
+    );
+    next.push({
+      id: message.id,
+      connectionId: message.connectionId,
+      name: message.name,
+      role: message.role,
+      lastSeen: Date.now(),
+    });
+    return next;
+  });
+}
+
+function pruneReforgedPresence() {
+  const cutoff = Date.now() - 15000;
+  ReforgedPresenceStore.update((current) => current.filter((entry) => entry.lastSeen >= cutoff));
+}
+
+function initReforgedPresence() {
+  const announce = async (type: "hello" | "announce") => {
+    try {
+      const message: PresenceMessage = {
+        type,
+        id: OBR.player.id,
+        connectionId: await OBR.player.getConnectionId(),
+        name: await OBR.player.getName(),
+        role: await OBR.player.getRole(),
+        timestamp: Date.now(),
+      };
+      upsertReforgedPresence(message);
+      OBR.broadcast.sendMessage(PRESENCE_KEY, message, { destination: "ALL" });
+    } catch (error) {
+      console.error("Failed to announce Reforged presence", error);
+    }
+  };
+
+  OBR.broadcast.onMessage(PRESENCE_KEY, ({ data }) => {
+    const message = data as PresenceMessage;
+    if (
+      !message ||
+      (message.type !== "hello" && message.type !== "announce") ||
+      typeof message.id !== "string" ||
+      typeof message.connectionId !== "string" ||
+      typeof message.name !== "string" ||
+      (message.role !== "GM" && message.role !== "PLAYER")
+    ) {
+      return;
+    }
+
+    upsertReforgedPresence(message);
+
+    // A newly opened Reforged client announces "hello". Existing clients
+    // immediately answer so it doesn't need to wait for the next heartbeat.
+    if (message.type === "hello" && message.connectionId !== undefined) {
+      announce("announce");
+    }
+  });
+
+  announce("hello");
+  window.setInterval(() => announce("announce"), 5000);
+  window.setInterval(pruneReforgedPresence, 5000);
 }
 
 function initPartyPresence() {

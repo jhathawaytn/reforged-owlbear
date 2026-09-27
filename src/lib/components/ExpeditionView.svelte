@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { isGM, PartyStore } from "../services/OBRHelper";
+  import { isGM, PartyStore, ReforgedPresenceStore } from "../services/OBRHelper";
+  import OBR from "@owlbear-rodeo/sdk";
   import {
     ExpeditionStore as expedition,
     saveExpeditionState,
@@ -58,7 +59,23 @@
   let quarterMessage = "";
   let playerRollBusy = false;
 
-  $: company = $PartyStore.map((p) => ({ id: p.id, name: p.name }));
+  $: {
+    const merged = new Map<string, CompanyMember>();
+
+    for (const player of $PartyStore) {
+      if (player.id !== OBR.player.id && player.role === "PLAYER") {
+        merged.set(player.id, { id: player.id, name: player.name });
+      }
+    }
+
+    for (const client of $ReforgedPresenceStore) {
+      if (client.id !== OBR.player.id && client.role === "PLAYER") {
+        merged.set(client.id, { id: client.id, name: client.name });
+      }
+    }
+
+    company = [...merged.values()];
+  }
   $: currentAssignments = $expedition.wilderness.assignments;
   $: assignedCompany = company.map((member) => ({
     member,
@@ -674,8 +691,12 @@
         {/if}
 
         <h2>COMPANY ASSIGNMENTS</h2>
-        <div class="text-[10px] text-gray-500 mb-2">
+        <div class="text-[10px] text-gray-500 mb-1">
           Choose each character's Quarter Activity and optional Travel Role. Everyone defaults to Travel.
+        </div>
+        <div class="text-[9px] text-gray-400 mb-2">
+          Owlbear party: {$PartyStore.filter((p) => p.role === "PLAYER").length}
+          · Reforged clients: {$ReforgedPresenceStore.filter((p) => p.role === "PLAYER" && p.id !== OBR.player.id).length}
         </div>
         {#if company.length}
           <div class="flex flex-col gap-2">
