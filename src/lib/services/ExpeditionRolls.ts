@@ -52,6 +52,7 @@ export type ExpeditionRollResponse = {
 };
 
 export const PendingExpeditionRollStore = writable<ExpeditionRollRequest | null>(null);
+export const LastExpeditionRollStore = writable<ExpeditionRollResponse | null>(null);
 
 let initialized = false;
 
@@ -136,6 +137,7 @@ export function initExpeditionRolls(): void {
   OBR.broadcast.onMessage(REQUEST_KEY, ({ data }) => {
     const request = data as ExpeditionRollRequest;
     if (!request || request.targetPlayerId !== OBR.player.id) return;
+    LastExpeditionRollStore.set(null);
     PendingExpeditionRollStore.set(request);
     showPopover(`${request.requestedBy} requests ${request.kind}. Open Company Expedition to roll.`);
   });
@@ -205,6 +207,7 @@ export async function resolvePendingExpeditionRoll(choice?: "INT" | "STR"): Prom
     fatigueApplied,
   };
 
+  LastExpeditionRollStore.set(response);
   PendingExpeditionRollStore.set(null);
   OBR.broadcast.sendMessage(RESULT_KEY, response, { destination: "ALL" });
   return response;
@@ -222,6 +225,7 @@ export async function declinePendingExpeditionRoll(): Promise<void> {
     playerName: await OBR.player.getName(),
     characterName: pc.name || (await OBR.player.getName()),
   };
+  LastExpeditionRollStore.set(response);
   PendingExpeditionRollStore.set(null);
   OBR.broadcast.sendMessage(RESULT_KEY, response, { destination: "ALL" });
 }

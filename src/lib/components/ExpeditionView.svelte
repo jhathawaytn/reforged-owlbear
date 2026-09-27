@@ -18,6 +18,7 @@
   } from "../model/ExpeditionStore";
   import {
     PendingExpeditionRollStore,
+    LastExpeditionRollStore,
     requestExpeditionRoll,
     resolvePendingExpeditionRoll,
     declinePendingExpeditionRoll,
@@ -1127,6 +1128,58 @@
       </div>
 
       <div class="exp-cell min-h-0 overflow-y-auto">
+        {#if !$isGM && !$PendingExpeditionRollStore && $LastExpeditionRollStore}
+          <div
+            class="border-2 rounded-md p-2 mb-2"
+            class:border-green-600={$LastExpeditionRollStore.roll?.success === true}
+            class:bg-green-50={$LastExpeditionRollStore.roll?.success === true}
+            class:border-red-600={$LastExpeditionRollStore.roll?.success === false}
+            class:bg-red-50={$LastExpeditionRollStore.roll?.success === false}
+            class:border-gray-400={$LastExpeditionRollStore.status === "declined"}
+            class:bg-gray-50={$LastExpeditionRollStore.status === "declined"}
+          >
+            <div class="flex items-center justify-between gap-2">
+              <div class="font-bold text-xs">LAST TRAVEL ROLL</div>
+              {#if $LastExpeditionRollStore.status === "declined"}
+                <div class="font-bold text-xs">DECLINED</div>
+              {:else if $LastExpeditionRollStore.roll}
+                <div
+                  class="font-bold text-sm"
+                  class:text-green-700={$LastExpeditionRollStore.roll.success}
+                  class:text-red-700={!$LastExpeditionRollStore.roll.success}
+                >
+                  {$LastExpeditionRollStore.roll.success ? "PASS" : "FAIL"}
+                </div>
+              {/if}
+            </div>
+            <div class="text-xs mt-1">
+              {$LastExpeditionRollStore.kind}
+              {#if $LastExpeditionRollStore.roll}
+                — d20 {$LastExpeditionRollStore.roll.natural}
+                {#if $LastExpeditionRollStore.modifier}
+                  {$LastExpeditionRollStore.modifier > 0 ? "+" : ""}{$LastExpeditionRollStore.modifier}
+                {/if}
+                = {$LastExpeditionRollStore.roll.total}
+                vs {$LastExpeditionRollStore.attribute} {$LastExpeditionRollStore.target}
+              {/if}
+            </div>
+            {#if $LastExpeditionRollStore.mode && $LastExpeditionRollStore.status === "rolled"}
+              <div class="text-[10px] text-gray-500 mt-0.5">
+                {$LastExpeditionRollStore.mode}
+                {#if $LastExpeditionRollStore.skillRank !== undefined}
+                  · Wilderness Craft R{$LastExpeditionRollStore.skillRank}
+                {/if}
+              </div>
+            {/if}
+            {#if $LastExpeditionRollStore.outcome}
+              <div class="text-[10px] mt-1">{$LastExpeditionRollStore.outcome}</div>
+            {/if}
+            {#if $LastExpeditionRollStore.fatigueApplied}
+              <div class="text-[10px] font-bold text-red-700 mt-1">+1 Fatigue applied to your character.</div>
+            {/if}
+          </div>
+        {/if}
+
         {#if !$isGM && $PendingExpeditionRollStore}
           <div class="border-2 border-black rounded-md p-2 mb-2 bg-gray-50">
             <div class="font-bold text-xs">GM ROLL REQUEST</div>
