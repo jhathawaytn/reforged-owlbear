@@ -709,6 +709,34 @@
     });
   }
 
+  async function resetDay() {
+    if (!$isGM) return;
+
+    clearQuarterPlan();
+    watchTask = null;
+    watchMessage = "";
+    dayMessage = "";
+
+    await patchWilderness({
+      day: 1,
+      quarter: "Morning",
+      paceDeclaredDay: 0,
+      weather: "Not rolled",
+      weatherEffect: "normal",
+      weatherNaturalRoll: 0,
+      weatherModifiedRoll: 0,
+      weatherRolledDay: 0,
+      weatherExtremeCandidate: "",
+      travelQuartersToday: 0,
+      forcedMarchStoppedPlayerIds: [],
+      quartermasterTodayId: "",
+      quartermasterCoveredTravelQuarters: 0,
+      quartermasterMissedToday: false,
+      assignments: [],
+      makeCampLeaderId: "",
+    });
+  }
+
   function makeTask(
     kind: ExpeditionRollKind,
     member: CompanyMember,
@@ -1211,7 +1239,18 @@
       <div class="exp-cell min-h-0 overflow-y-auto">
         <div class="flex items-center justify-between gap-2">
           <h2>WILDERNESS TRAVEL</h2>
-          <span class="text-xs font-bold">Day {$expedition.wilderness.day}</span>
+          <div class="flex items-center gap-1">
+            <span class="text-xs font-bold">Day {$expedition.wilderness.day}</span>
+            {#if $isGM}
+              <button
+                class="border border-red-300 bg-red-50 text-red-800 rounded px-2 py-0.5 text-[9px]"
+                title="Return the expedition clock to Day 1 / Morning and clear day-scoped state"
+                on:click={resetDay}
+              >
+                Reset Day
+              </button>
+            {/if}
+          </div>
         </div>
 
         <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2 text-xs">
