@@ -2073,10 +2073,6 @@
     box-shadow: inset 0 0 5px #000;
   }
 
-  .assignment-card {
-    @apply border rounded-md p-2 bg-gray-50 min-w-0;
-  }
-
   .role-chip {
     @apply ml-auto text-[9px] px-1 rounded bg-black text-white whitespace-nowrap;
   }
