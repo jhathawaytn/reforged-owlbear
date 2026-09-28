@@ -275,6 +275,17 @@
   ) && npcSleeperIds.every((id) =>
     $expedition.wilderness.sleptPlayerIdsToday.includes(id),
   );
+  $: unresolvedConsumptionMembers = playerMembers.filter((member) => {
+    const ordinaryMissing =
+      !$expedition.wilderness.consumptionResolvedPlayerIds.includes(member.id);
+    const extraMissing = unresolvedExtraWaterRolls(member.id) > 0;
+    return ordinaryMissing || extraMissing;
+  });
+  $: unresolvedSleepMembers = sleeperEntries.filter(
+    ({ member }) => !$expedition.wilderness.sleptPlayerIdsToday.includes(member.id),
+  );
+  $: quarterRollsDone =
+    quarterPlanActive && quarterTasks.every((task) => task.status === "done");
   $: forcedMarchFailures = quarterTasks.filter(
     (task) => task.kind === "Forced March" && task.response?.roll?.success === false,
   );
@@ -1222,7 +1233,9 @@
     }
 
     const quartermasterAssignment = currentAssignments.find(
-      (assignment) => assignment.role === "Quartermaster" && assignment.activity === "Travel",
+      (assignment) =>
+        assignment.role === "Quartermaster" &&
+        (assignment.activity === "Travel" || assignment.activity === "Make Camp"),
     );
     if (quartermasterAssignment) {
       const qm = memberForId(quartermasterAssignment.playerId);
@@ -2008,25 +2021,43 @@
                 {/each}
               </div>
               {#if quarterRequiresConsumption}
-                <div class="mt-2 border rounded px-2 py-1 bg-white text-[10px] flex items-center gap-2">
-                  <span class="font-bold">Daily Food & Water</span>
-                  <span class="ml-auto">
-                    {$expedition.wilderness.consumptionResolvedPlayerIds.length}/{playerMembers.length} players
-                  </span>
-                  {#if $isGM && (!dailyConsumptionReady || !extraWaterReady)}
-                    <button class="border rounded px-2 py-0.5" on:click={promptDailyConsumption}>Prompt Again</button>
+                <div class="mt-2 border-2 border-amber-500 rounded p-2 bg-amber-50 text-[10px]">
+                  <div class="flex items-center gap-2">
+                    <span class="font-bold">WAITING — Daily Food & Water</span>
+                    <span class="ml-auto">
+                      {$expedition.wilderness.consumptionResolvedPlayerIds.length}/{playerMembers.length} players
+                    </span>
+                    {#if $isGM}
+                      <button class="border rounded px-2 py-0.5 bg-white" on:click={promptDailyConsumption}>Prompt Again</button>
+                    {/if}
+                  </div>
+                  {#if unresolvedConsumptionMembers.length}
+                    <div class="mt-1">
+                      Waiting on: {unresolvedConsumptionMembers.map((member) => member.name).join(", ")}.
+                      The Quarter cannot complete until their required Ration/Water Usage is resolved.
+                    </div>
                   {/if}
                 </div>
               {/if}
               {#if sleeperEntries.length}
-                <div class="mt-1 border rounded px-2 py-1 bg-white text-[10px] flex items-center gap-2">
-                  <span class="font-bold">Sleep / Rest</span>
-                  <span>{$expedition.wilderness.campRestQuality || "No quality set"}</span>
-                  <span class="ml-auto">
-                    {$expedition.wilderness.sleptPlayerIdsToday.filter((id) => sleeperEntries.some(({ member }) => member.id === id)).length}/{sleeperEntries.length}
-                  </span>
-                  {#if $isGM && restQualityReady && !sleepersResolved}
-                    <button class="border rounded px-2 py-0.5" on:click={promptRestForSleepers}>Prompt Again</button>
+                <div
+                  class="mt-1 border rounded px-2 py-1 text-[10px]"
+                  class:border-amber-500={!sleepersResolved}
+                  class:bg-amber-50={!sleepersResolved}
+                  class:bg-white={sleepersResolved}
+                >
+                  <div class="flex items-center gap-2">
+                    <span class="font-bold">{sleepersResolved ? "Sleep / Rest" : "WAITING — Sleep / Rest"}</span>
+                    <span>{$expedition.wilderness.campRestQuality || "No quality set"}</span>
+                    <span class="ml-auto">
+                      {$expedition.wilderness.sleptPlayerIdsToday.filter((id) => sleeperEntries.some(({ member }) => member.id === id)).length}/{sleeperEntries.length}
+                    </span>
+                    {#if $isGM && restQualityReady && !sleepersResolved}
+                      <button class="border rounded px-2 py-0.5 bg-white" on:click={promptRestForSleepers}>Prompt Again</button>
+                    {/if}
+                  </div>
+                  {#if unresolvedSleepMembers.length}
+                    <div class="mt-1">Waiting on: {unresolvedSleepMembers.map(({ member }) => member.name).join(", ")}.</div>
                   {/if}
                 </div>
               {/if}
@@ -2059,6 +2090,17 @@
                 >
                   Complete {$expedition.wilderness.quarter} Quarter
                 </button>
+                {#if !allQuarterTasksDone}
+                  <div class="text-[10px] text-amber-800 mt-1">
+                    {#if !quarterRollsDone}
+                      Waiting for required Quarter Saves.
+                    {:else if unresolvedConsumptionMembers.length}
+                      Waiting for daily Food/Water: {unresolvedConsumptionMembers.map((member) => member.name).join(", ")}.
+                    {:else if unresolvedSleepMembers.length}
+                      Waiting for Rest: {unresolvedSleepMembers.map(({ member }) => member.name).join(", ")}.
+                    {/if}
+                  </div>
+                {/if}
               {/if}
             </div>
           {/if}
@@ -2626,15 +2668,32 @@
                 </label>
 
                 <label class="block mt-1">
-                  Travel Role
-                  <select disabled={!$isGM || assignment.activity !== "Travel"} value={assignment.role ?? ""} on:change={(e) => onRoleChange(p.id, e)}>
+                  Role
+                  <select
+                    disabled={!$isGM || (assignment.activity !== "Travel" && assignment.activity !== "Make Camp")}
+                    value={assignment.role ?? ""}
+                    on:change={(e) => onRoleChange(p.id, e)}
+                  >
                     <option value="">None</option>
                     {#each ROLES as role}
-                      <option value={role} disabled={!roleEligible(p, role)}>{role}</option>
+                      <option
+                        value={role}
+                        disabled={
+                          !roleEligible(p, role) ||
+                          ((role === "Trailblazer" || role === "Keep Watch") && assignment.activity !== "Travel") ||
+                          (role === "Quartermaster" && incompatibleWithQuartermaster(assignment.activity))
+                        }
+                      >
+                        {role}
+                      </option>
                     {/each}
                   </select>
                 </label>
-                {#if assignment.activity !== "Travel" && assignment.role}
+                {#if assignment.activity === "Make Camp" && assignment.role === "Quartermaster"}
+                  <div class="text-[9px] text-gray-500 mt-0.5">
+                    Quartermaster remains active and may assist Make Camp. The daily supply benefit still depends on having managed the day's traveling Quarters.
+                  </div>
+                {:else if assignment.activity !== "Travel" && assignment.role}
                   <div class="text-[9px] text-gray-500 mt-0.5">
                     {assignment.role} is stored and becomes active again when this member returns to Travel.
                   </div>
