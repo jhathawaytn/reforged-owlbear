@@ -83,16 +83,17 @@
   }
 
   $: shieldOptions = $pc.gear.filter(
-    (g) => hasArmorProperty(g, "Shield Sacrifice") && g.equipped && isFunctional(g),
+    (g) => hasArmorProperty(g, "Shield Sacrifice") && g.zone === "Hand" && g.equipped && isFunctional(g),
   );
   $: blockShieldOptions = $pc.gear.filter(
     (g) =>
       (g.name === "Shield" || g.name === "Buckler") &&
+      g.zone === "Hand" &&
       g.equipped &&
       isFunctional(g),
   );
   $: usableWeaponGear = $pc.gear.filter(
-    (g) => g.durableCategory === "Weapon" && g.equipped && isFunctional(g),
+    (g) => g.durableCategory === "Weapon" && g.zone === "Hand" && g.equipped && isFunctional(g),
   );
   $: deflectOptions = $pc.gear.filter(
     (g) => g.durableCategory === "Armor" && g.equipped && isFunctional(g),
@@ -106,13 +107,13 @@
     // Fictional constraints (room to Dodge, Surprise, terrain, etc.) remain
     // the GM/player's call under §13.7.8.
     if (r === "ShieldSacrifice" && shieldOptions.length === 0) {
-      return "Requires a functional full Shield.";
+      return "Requires a functional full Shield in Hand.";
     }
     if (r === "Block" && blockShieldOptions.length === 0 && usableWeaponGear.length === 0) {
-      return "Requires a functional Shield/Buckler or suitable weapon.";
+      return "Requires a functional Shield/Buckler or suitable weapon in Hand.";
     }
-    if (r === "Parry" && usableWeaponGear.length === 0 && $pc.attacks.length === 0) {
-      return "Requires a weapon.";
+    if (r === "Parry" && usableWeaponGear.length === 0) {
+      return "Requires a functional weapon in Hand.";
     }
     return "";
   }
