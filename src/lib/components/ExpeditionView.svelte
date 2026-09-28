@@ -41,7 +41,15 @@
   import { rollDiceValues, rollReforgedSave } from "../services/DicePlus";
   import { newId } from "../utils";
 
-  type TravelWorkflowStep = "weather" | "pace" | "plan" | "resolve" | "complete";
+  type TravelWorkflowStep =
+    | "climate"
+    | "terrain"
+    | "route"
+    | "weather"
+    | "pace"
+    | "plan"
+    | "resolve"
+    | "complete";
 
   type CompanyMember = {
     id: string;
@@ -209,24 +217,36 @@
       : $expedition.wilderness.pace === "Steady"
         ? 2
         : $expedition.wilderness.forcedTravelTarget;
+  $: climateReady = $expedition.wilderness.climateLocked;
+  $: terrainReady = $expedition.wilderness.terrainConfirmedDay === $expedition.wilderness.day;
+  $: routeReady = $expedition.wilderness.routeConfirmedDay === $expedition.wilderness.day;
   $: weatherReady = $expedition.wilderness.weatherRolledDay === $expedition.wilderness.day;
   $: paceReady = $expedition.wilderness.paceDeclaredDay === $expedition.wilderness.day;
   $: workflowStep = (
-    !weatherReady
-      ? "weather"
-      : !paceReady
-        ? "pace"
-        : !quarterPlanActive
-          ? "plan"
-          : allQuarterTasksDone
-            ? "complete"
-            : "resolve"
+    !climateReady
+      ? "climate"
+      : !terrainReady
+        ? "terrain"
+        : !routeReady
+          ? "route"
+          : !weatherReady
+            ? "weather"
+            : !paceReady
+              ? "pace"
+              : !quarterPlanActive
+                ? "plan"
+                : allQuarterTasksDone
+                  ? "complete"
+                  : "resolve"
   ) as TravelWorkflowStep;
   $: workflowStepNumber =
-    workflowStep === "weather" ? 1 :
-    workflowStep === "pace" ? 2 :
-    workflowStep === "plan" ? 3 :
-    workflowStep === "resolve" ? 4 : 5;
+    workflowStep === "climate" ? 1 :
+    workflowStep === "terrain" ? 2 :
+    workflowStep === "route" ? 3 :
+    workflowStep === "weather" ? 4 :
+    workflowStep === "pace" ? 5 :
+    workflowStep === "plan" ? 6 :
+    workflowStep === "resolve" ? 7 : 8;
 
   async function setMode(mode: ExpeditionMode) {
     if (!$isGM) return;
@@ -357,6 +377,10 @@
 
   async function rollWeather() {
     if (!$isGM || weatherReady) return;
+    if (!climateReady || !terrainReady || !routeReady) {
+      dayMessage = "Confirm Climate, Terrain, and Route before rolling Weather.";
+      return;
+    }
     clearQuarterPlan();
     dayMessage = "";
 
@@ -450,7 +474,26 @@
 
   function onRouteChange(e: Event) {
     clearQuarterPlan();
-    patchWilderness({ routeMode: (e.currentTarget as HTMLSelectElement).value as RouteMode });
+    patchWilderness({
+      routeMode: (e.currentTarget as HTMLSelectElement).value as RouteMode,
+      routeConfirmedDay: 0,
+      weatherRolledDay: 0,
+      paceDeclaredDay: 0,
+      weather: "Not rolled",
+      weatherExtremeCandidate: "",
+    });
+  }
+
+  async function confirmRoute() {
+    if (!$isGM || !terrainReady) return;
+    clearQuarterPlan();
+    await patchWilderness({
+      routeConfirmedDay: $expedition.wilderness.day,
+      weatherRolledDay: 0,
+      paceDeclaredDay: 0,
+      weather: "Not rolled",
+      weatherExtremeCandidate: "",
+    });
   }
 
   function onPaceChange(e: Event) {
@@ -470,6 +513,7 @@
   }
 
   function onClimateChange(e: Event) {
+    if ($expedition.wilderness.climateLocked) return;
     clearQuarterPlan();
     patchWilderness({
       climate: (e.currentTarget as HTMLSelectElement).value as TravelClimate,
@@ -480,9 +524,58 @@
     });
   }
 
+  async function lockClimate() {
+    if (!$isGM) return;
+    clearQuarterPlan();
+    await patchWilderness({
+      climateLocked: true,
+      terrainConfirmedDay: 0,
+      routeConfirmedDay: 0,
+      weatherRolledDay: 0,
+      paceDeclaredDay: 0,
+      weather: "Not rolled",
+      weatherExtremeCandidate: "",
+    });
+  }
+
+  async function unlockClimate() {
+    if (!$isGM) return;
+    clearQuarterPlan();
+    await patchWilderness({
+      climateLocked: false,
+      terrainConfirmedDay: 0,
+      routeConfirmedDay: 0,
+      weatherRolledDay: 0,
+      paceDeclaredDay: 0,
+      weather: "Not rolled",
+      weatherExtremeCandidate: "",
+    });
+  }
+
   function onTerrainChange(e: Event) {
     clearQuarterPlan();
-    patchWilderness({ terrain: (e.currentTarget as HTMLSelectElement).value as TravelTerrain });
+    patchWilderness({
+      terrain: (e.currentTarget as HTMLSelectElement).value as TravelTerrain,
+      terrainConfirmedDay: 0,
+      routeConfirmedDay: 0,
+      weatherRolledDay: 0,
+      paceDeclaredDay: 0,
+      weather: "Not rolled",
+      weatherExtremeCandidate: "",
+    });
+  }
+
+  async function confirmTerrain() {
+    if (!$isGM || !climateReady) return;
+    clearQuarterPlan();
+    await patchWilderness({
+      terrainConfirmedDay: $expedition.wilderness.day,
+      routeConfirmedDay: 0,
+      weatherRolledDay: 0,
+      paceDeclaredDay: 0,
+      weather: "Not rolled",
+      weatherExtremeCandidate: "",
+    });
   }
 
   function memberForId(id: string): CompanyMember | undefined {
@@ -738,6 +831,8 @@
     await patchWilderness({
       day: 1,
       quarter: "Morning",
+      terrainConfirmedDay: 0,
+      routeConfirmedDay: 0,
       paceDeclaredDay: 0,
       weather: "Not rolled",
       weatherEffect: "normal",
@@ -750,8 +845,6 @@
       quartermasterTodayId: "",
       quartermasterCoveredTravelQuarters: 0,
       quartermasterMissedToday: false,
-      assignments: [],
-      makeCampLeaderId: "",
     });
   }
 
@@ -810,6 +903,12 @@
     }
 
     if (travelingThisQuarter) {
+      if (!climateReady || !terrainReady || !routeReady) {
+        quarterPlanActive = false;
+        quarterTasks = [];
+        quarterMessage = "Confirm Climate, Terrain, and Route before resolving travel.";
+        return;
+      }
       if (!weatherReady) {
         quarterPlanActive = false;
         quarterTasks = [];
@@ -1200,13 +1299,13 @@
       progress,
       quarter: next.quarter,
       day: nextDay,
+      terrainConfirmedDay: next.daysAdvanced ? 0 : $expedition.wilderness.terrainConfirmedDay,
+      routeConfirmedDay: next.daysAdvanced ? 0 : $expedition.wilderness.routeConfirmedDay,
       travelQuartersToday: next.daysAdvanced ? 0 : travelCount,
       forcedMarchStoppedPlayerIds: next.daysAdvanced ? [] : $expedition.wilderness.forcedMarchStoppedPlayerIds,
       quartermasterTodayId: next.daysAdvanced ? "" : quartermasterTodayId,
       quartermasterCoveredTravelQuarters: next.daysAdvanced ? 0 : quartermasterCoveredTravelQuarters,
       quartermasterMissedToday: next.daysAdvanced ? false : quartermasterMissedToday,
-      makeCampLeaderId: "",
-      assignments: [],
     });
 
     quarterTasks = [];
@@ -1217,7 +1316,7 @@
       `${completedLabel} resolved. ` +
       `${progressMade ? "Travel progress +1. " : travelingThisQuarter ? "No travel progress. " : "Company did not travel. "}` +
       `${weatherDelay ? `Weather consumed +${weatherDelay} additional Quarter${weatherDelay === 1 ? "" : "s"}. ` : ""}` +
-      `${next.daysAdvanced ? `Day ${nextDay} begins; roll new Weather and declare a new Pace before further travel.` : ""}`;
+      `${next.daysAdvanced ? `Day ${nextDay} begins; confirm Terrain and Route, then roll new Weather and declare Pace.` : ""}`;
   }
 
   async function playerResolve(choice?: "INT" | "STR") {
@@ -1281,11 +1380,22 @@
           <div class="flex items-center gap-1">
             <span class="status-chip">Day {$expedition.wilderness.day}</span>
             <span class="status-chip">{$expedition.wilderness.quarter}</span>
-            <span class="status-chip">{$expedition.wilderness.routeMode}</span>
           </div>
         </div>
 
         <div class="grid grid-cols-2 md:grid-cols-4 gap-1 mt-2 text-[10px]">
+          <div class="status-box">
+            <div class="status-label">Climate</div>
+            <div class="font-bold">{$expedition.wilderness.climate}{climateReady ? "" : " · SETUP"}</div>
+          </div>
+          <div class="status-box">
+            <div class="status-label">Terrain</div>
+            <div class="font-bold">{$expedition.wilderness.terrain}{terrainReady ? "" : " · CONFIRM"}</div>
+          </div>
+          <div class="status-box">
+            <div class="status-label">Route</div>
+            <div class="font-bold">{$expedition.wilderness.routeMode}{routeReady ? "" : " · CONFIRM"}</div>
+          </div>
           <div class="status-box">
             <div class="status-label">Weather</div>
             <div class="font-bold">{weatherReady ? $expedition.wilderness.weather : "Not rolled"}</div>
@@ -1298,13 +1408,13 @@
             <div class="status-label">Travel Today</div>
             <div class="font-bold">{$expedition.wilderness.travelQuartersToday} / {paceTravelTarget} Quarters</div>
           </div>
-          <div class="status-box">
+          <div class="status-box md:col-span-2">
             <div class="status-label">Journey Progress</div>
             <div class="font-bold">
               {#if $expedition.wilderness.routeMode === "Known Route"}
-                {$expedition.wilderness.progress} / {$expedition.wilderness.routeTimeQuarters || "?"}
+                {$expedition.wilderness.progress} / {$expedition.wilderness.routeTimeQuarters || "?"} Quarters
               {:else}
-                {$expedition.wilderness.progress} successful
+                {$expedition.wilderness.progress} successful travel {$expedition.wilderness.progress === 1 ? "Quarter" : "Quarters"}
               {/if}
             </div>
           </div>
@@ -1313,8 +1423,14 @@
         <div class="workflow-card mt-2">
           <div class="flex items-center justify-between gap-2">
             <div>
-              <div class="text-[9px] uppercase tracking-wide text-gray-500">Current Step · {workflowStepNumber} of 5</div>
-              {#if workflowStep === "weather"}
+              <div class="text-[9px] uppercase tracking-wide text-gray-500">Current Step · {workflowStepNumber} of 8</div>
+              {#if workflowStep === "climate"}
+                <div class="font-bold text-sm">Journey Setup — Lock Climate</div>
+              {:else if workflowStep === "terrain"}
+                <div class="font-bold text-sm">Day {$expedition.wilderness.day} — Confirm Terrain</div>
+              {:else if workflowStep === "route"}
+                <div class="font-bold text-sm">Day {$expedition.wilderness.day} — Confirm Route</div>
+              {:else if workflowStep === "weather"}
                 <div class="font-bold text-sm">Dawn — Roll Weather</div>
               {:else if workflowStep === "pace"}
                 <div class="font-bold text-sm">Dawn — Declare Pace</div>
@@ -1327,7 +1443,10 @@
               {/if}
             </div>
             <div class="text-[10px] text-gray-500">
-              {workflowStep === "weather" ? "Weather before Pace and Activities" :
+              {workflowStep === "climate" ? "Choose once for the whole journey" :
+               workflowStep === "terrain" ? "Terrain may change each Travel Day" :
+               workflowStep === "route" ? "Route state follows the day's Terrain" :
+               workflowStep === "weather" ? "Weather comes after Terrain and Route" :
                workflowStep === "pace" ? "One Pace for the Travel Phase" :
                workflowStep === "plan" ? "Everyone takes one Quarter Activity" :
                workflowStep === "resolve" ? "Required Saves are resolving" :
@@ -1335,7 +1454,46 @@
             </div>
           </div>
 
-          {#if workflowStep === "weather"}
+          {#if workflowStep === "climate"}
+            <div class="mt-2 flex flex-wrap items-end gap-2 text-xs">
+              <label>
+                Climate / Season
+                <select disabled={!$isGM} value={$expedition.wilderness.climate} on:change={onClimateChange}>
+                  {#each CLIMATES as climate}<option value={climate}>{climate}</option>{/each}
+                </select>
+              </label>
+              <div class="text-[10px] text-gray-500 flex-1 min-w-[180px]">
+                Climate is selected once and locked for this journey because it drives the persistent weather table.
+              </div>
+              {#if $isGM}<button class="primary-action" on:click={lockClimate}>Lock Climate</button>{/if}
+            </div>
+          {:else if workflowStep === "terrain"}
+            <div class="mt-2 flex flex-wrap items-end gap-2 text-xs">
+              <label>
+                Terrain
+                <select disabled={!$isGM} value={$expedition.wilderness.terrain} on:change={onTerrainChange}>
+                  {#each TERRAINS as terrain}<option value={terrain}>{terrain}</option>{/each}
+                </select>
+              </label>
+              <div class="text-[10px] text-gray-500 flex-1 min-w-[180px]">
+                Confirm the terrain for Day {$expedition.wilderness.day}. It may change again at the next dawn.
+              </div>
+              {#if $isGM}<button class="primary-action" on:click={confirmTerrain}>Confirm Terrain</button>{/if}
+            </div>
+          {:else if workflowStep === "route"}
+            <div class="mt-2 flex flex-wrap items-end gap-2 text-xs">
+              <label>
+                Route
+                <select disabled={!$isGM} value={$expedition.wilderness.routeMode} on:change={onRouteChange}>
+                  {#each ROUTES as route}<option value={route}>{route}</option>{/each}
+                </select>
+              </label>
+              <div class="text-[10px] text-gray-500 flex-1 min-w-[180px]">
+                Confirm whether today's travel follows a Known Route or crosses Unmapped Country.
+              </div>
+              {#if $isGM}<button class="primary-action" on:click={confirmRoute}>Confirm Route</button>{/if}
+            </div>
+          {:else if workflowStep === "weather"}
             <div class="mt-2 text-xs">
               <div class="text-gray-600">Roll the persistent 2d6 weather front for Day {$expedition.wilderness.day}.</div>
               {#if $isGM}
@@ -1369,7 +1527,7 @@
           {:else if workflowStep === "plan"}
             <div class="mt-2">
               <div class="text-[10px] text-gray-600 mb-1">
-                Everyone defaults to Travel. Change only the characters doing something else, then confirm the Quarter.
+                The previous Quarter's Activities and Roles are carried forward. Change only what is different, then confirm the Quarter.
               </div>
               <div class="grid grid-cols-1 md:grid-cols-2 gap-1">
                 {#each assignedCompany as entry (entry.member.id)}
@@ -1481,22 +1639,25 @@
           <div class="p-2 pt-1 text-xs">
             <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
               <label>
-                Route
-                <select disabled={!$isGM} value={$expedition.wilderness.routeMode} on:change={onRouteChange}>
-                  {#each ROUTES as route}<option value={route}>{route}</option>{/each}
+                Climate / Season
+                <select disabled={!$isGM || climateReady} value={$expedition.wilderness.climate} on:change={onClimateChange}>
+                  {#each CLIMATES as climate}<option value={climate}>{climate}</option>{/each}
                 </select>
+                <div class="text-[9px] text-gray-500">{climateReady ? "Locked for journey" : "Select first"}</div>
               </label>
               <label>
                 Terrain
-                <select disabled={!$isGM} value={$expedition.wilderness.terrain} on:change={onTerrainChange}>
+                <select disabled={!$isGM || !climateReady} value={$expedition.wilderness.terrain} on:change={onTerrainChange}>
                   {#each TERRAINS as terrain}<option value={terrain}>{terrain}</option>{/each}
                 </select>
+                <div class="text-[9px] text-gray-500">{terrainReady ? `Confirmed Day ${$expedition.wilderness.day}` : "Confirm each day"}</div>
               </label>
               <label>
-                Climate / Season
-                <select disabled={!$isGM || weatherReady} value={$expedition.wilderness.climate} on:change={onClimateChange}>
-                  {#each CLIMATES as climate}<option value={climate}>{climate}</option>{/each}
+                Route
+                <select disabled={!$isGM || !terrainReady} value={$expedition.wilderness.routeMode} on:change={onRouteChange}>
+                  {#each ROUTES as route}<option value={route}>{route}</option>{/each}
                 </select>
+                <div class="text-[9px] text-gray-500">{routeReady ? `Confirmed Day ${$expedition.wilderness.day}` : "Confirm after Terrain"}</div>
               </label>
             </div>
 
@@ -1536,6 +1697,9 @@
 
             {#if $isGM}
               <div class="flex flex-wrap gap-1 mt-2 pt-2 border-t">
+                {#if climateReady}<button class="border rounded px-2 py-1 text-[10px]" on:click={unlockClimate}>Unlock Climate</button>{/if}
+                {#if climateReady && !terrainReady}<button class="border rounded px-2 py-1 text-[10px]" on:click={confirmTerrain}>Confirm Terrain</button>{/if}
+                {#if terrainReady && !routeReady}<button class="border rounded px-2 py-1 text-[10px]" on:click={confirmRoute}>Confirm Route</button>{/if}
                 {#if paceReady}<button class="border rounded px-2 py-1 text-[10px]" on:click={unlockPace}>Unlock Pace</button>{/if}
                 <button class="border border-red-300 bg-red-50 text-red-800 rounded px-2 py-1 text-[10px]" on:click={resetTravel}>Reset Travel</button>
                 <button class="border border-red-300 bg-red-50 text-red-800 rounded px-2 py-1 text-[10px]" on:click={resetDay}>Reset Day</button>
@@ -1597,9 +1761,15 @@
                 <div class="flex items-center gap-2">
                   <span class="font-bold">Keep Watch</span>
                   <span>{keepWatchMember?.name ?? "Unassigned"}</span>
+                  {#if keepWatchMember}<span class="role-chip">Armed</span>{/if}
                   {#if $isGM}
-                    <button class="ml-auto border rounded px-2 py-1" on:click={triggerKeepWatch}>Trigger</button>
+                    <button class="ml-auto border rounded px-2 py-1" title="GM override/test: roll only when something would otherwise surprise the Company" on:click={triggerKeepWatch}>Trigger</button>
                   {/if}
+                </div>
+                <div class="text-gray-500 mt-0.5">
+                  {keepWatchMember
+                    ? "No Quarter roll. Keep Watch rolls only when something would otherwise surprise the Company."
+                    : "No watcher assigned; a surprise trigger leaves the Company automatically surprised."}
                 </div>
                 {#if watchMessage}<div class="mt-1">{watchMessage}</div>{/if}
               </div>
@@ -1792,7 +1962,7 @@
 
         <h2>QUARTER PLAN</h2>
         <div class="text-[10px] text-gray-500 mb-1">
-          Everyone defaults to Travel. Change only the members doing something different, then use the Current Step card to continue.
+          Day 1 Morning establishes the starting plan. Activities and Roles carry forward until you change or reset them.
         </div>
         <div class="text-[9px] text-gray-400 mb-2">
           Owlbear party: {$PartyStore.filter((p) => p.role === "PLAYER").length}

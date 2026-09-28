@@ -61,7 +61,10 @@ export type WildernessExpeditionState = {
   paceDeclaredDay: number;
   forcedTravelTarget: 3 | 4;
   terrain: TravelTerrain;
+  terrainConfirmedDay: number;
+  routeConfirmedDay: number;
   climate: TravelClimate;
+  climateLocked: boolean;
   weather: string;
   weatherEffect: TravelWeatherEffect;
   weatherModifier: number;
@@ -108,7 +111,10 @@ export const defaultExpeditionState = (): ExpeditionState => ({
     paceDeclaredDay: 0,
     forcedTravelTarget: 3,
     terrain: "Open",
+    terrainConfirmedDay: 0,
+    routeConfirmedDay: 0,
     climate: "Temperate Spring / Fall",
+    climateLocked: false,
     weather: "Not rolled",
     weatherEffect: "normal",
     weatherModifier: 0,
