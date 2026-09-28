@@ -306,6 +306,13 @@
   $: routeReady = $expedition.wilderness.routeConfirmedDay === $expedition.wilderness.day;
   $: weatherReady = $expedition.wilderness.weatherRolledDay === $expedition.wilderness.day;
   $: paceReady = $expedition.wilderness.paceDeclaredDay === $expedition.wilderness.day;
+  $: knownRouteComplete =
+    $expedition.wilderness.routeMode === "Known Route" &&
+    $expedition.wilderness.routeTimeQuarters > 0 &&
+    $expedition.wilderness.progress >= $expedition.wilderness.routeTimeQuarters;
+  $: arrivalCanBeRecorded =
+    $expedition.wilderness.destination.trim().length > 0 &&
+    ($expedition.wilderness.routeMode === "Unmapped Country" || knownRouteComplete);
   $: workflowStep = (
     !climateReady
       ? "climate"
@@ -944,6 +951,28 @@
       return;
     }
     await patchWilderness({ makeCampLeaderId: playerId });
+  }
+
+  async function arriveAtDestination() {
+    if (!$isGM || !arrivalCanBeRecorded) return;
+
+    const arrivedAt = $expedition.wilderness.destination.trim();
+    clearQuarterPlan();
+    watchTask = null;
+    watchMessage = "";
+    dayMessage = "";
+
+    await patchWilderness({
+      currentLocation: arrivedAt,
+      destination: "",
+      progress: 0,
+      routeTimeQuarters: 0,
+      routeConfirmedDay: 0,
+      assignments: [],
+      makeCampLeaderId: "",
+    });
+
+    quarterMessage = `Arrived at ${arrivedAt}. Enter a new destination to begin the next leg.`;
   }
 
   async function resetTravel() {
@@ -1871,6 +1900,20 @@
           </div>
         </div>
 
+        {#if knownRouteComplete}
+          <div class="mt-2 border border-emerald-300 bg-emerald-50 rounded-md px-2 py-2 text-xs">
+            <div class="font-bold">Known Route complete</div>
+            <div class="text-[10px] text-emerald-900">
+              The recorded travel time has been reached. Record Arrival before beginning another leg.
+            </div>
+            {#if $isGM && arrivalCanBeRecorded}
+              <button class="mt-1 bg-emerald-800 text-white rounded px-2 py-1 text-[10px]" on:click={arriveAtDestination}>
+                Arrive at {$expedition.wilderness.destination}
+              </button>
+            {/if}
+          </div>
+        {/if}
+
         <div class="workflow-card mt-2">
           <div class="flex items-center justify-between gap-2">
             <div>
@@ -2196,6 +2239,37 @@
                   <span class="text-[10px] text-gray-500">Quarters</span>
                 </div>
               </label>
+            {/if}
+
+            {#if $isGM && $expedition.wilderness.destination.trim()}
+              <div class="mt-2 border rounded-md bg-white px-2 py-1.5">
+                <div class="flex items-center justify-between gap-2">
+                  <div>
+                    <div class="font-bold text-[10px]">Arrival</div>
+                    <div class="text-[9px] text-gray-500">
+                      {$expedition.wilderness.routeMode === "Known Route"
+                        ? knownRouteComplete
+                          ? "Recorded route time reached."
+                          : `${$expedition.wilderness.progress} / ${$expedition.wilderness.routeTimeQuarters || "?"} Quarters complete.`
+                        : "GM records Arrival when the destination is reached."}
+                    </div>
+                  </div>
+                  <button
+                    class="border rounded px-2 py-1 text-[10px]"
+                    class:bg-emerald-800={arrivalCanBeRecorded}
+                    class:text-white={arrivalCanBeRecorded}
+                    disabled={!arrivalCanBeRecorded}
+                    title={
+                      arrivalCanBeRecorded
+                        ? "Move the Company to this destination and clear this leg's route progress."
+                        : "Known Routes can record Arrival after their recorded route time is reached."
+                    }
+                    on:click={arriveAtDestination}
+                  >
+                    Record Arrival
+                  </button>
+                </div>
+              </div>
             {/if}
 
             {#if $isGM}
