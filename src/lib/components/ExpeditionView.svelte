@@ -41,6 +41,8 @@
   import { rollDiceValues, rollReforgedSave } from "../services/DicePlus";
   import { newId } from "../utils";
 
+  type TravelWorkflowStep = "weather" | "pace" | "plan" | "resolve" | "complete";
+
   type CompanyMember = {
     id: string;
     name: string;
@@ -209,6 +211,22 @@
         : $expedition.wilderness.forcedTravelTarget;
   $: weatherReady = $expedition.wilderness.weatherRolledDay === $expedition.wilderness.day;
   $: paceReady = $expedition.wilderness.paceDeclaredDay === $expedition.wilderness.day;
+  $: workflowStep = (
+    !weatherReady
+      ? "weather"
+      : !paceReady
+        ? "pace"
+        : !quarterPlanActive
+          ? "plan"
+          : allQuarterTasksDone
+            ? "complete"
+            : "resolve"
+  ) as TravelWorkflowStep;
+  $: workflowStepNumber =
+    workflowStep === "weather" ? 1 :
+    workflowStep === "pace" ? 2 :
+    workflowStep === "plan" ? 3 :
+    workflowStep === "resolve" ? 4 : 5;
 
   async function setMode(mode: ExpeditionMode) {
     if (!$isGM) return;
@@ -958,8 +976,26 @@
     quarterTasks = tasks;
     quarterPlanActive = true;
     quarterMessage = tasks.length
-      ? "Request each required Save, then complete the Quarter."
+      ? "Required Saves are ready. Player requests will be sent automatically."
       : "No Save is required for the declared Activities. The Quarter is ready to complete.";
+  }
+
+  async function beginQuarterResolution() {
+    if (!$isGM) return;
+
+    planQuarterResolution();
+    await Promise.resolve();
+
+    if (!quarterPlanActive) return;
+
+    for (const task of [...quarterTasks]) {
+      const member = memberForId(task.playerId);
+
+      // NPC Make Camp still needs the GM to choose INT or STR.
+      if (member?.source === "npc" && task.attributeMode === "INT_OR_STR") continue;
+
+      void resolveTask(task);
+    }
   }
 
   function setTaskState(task: QuarterTask, watch = false) {
@@ -1238,114 +1274,175 @@
     <div class="grid grid-cols-1 md:grid-cols-[2fr_1fr] gap-2 flex-1 min-h-0">
       <div class="exp-cell min-h-0 overflow-y-auto">
         <div class="flex items-center justify-between gap-2">
-          <h2>WILDERNESS TRAVEL</h2>
-          <div class="flex items-center gap-1">
-            <span class="text-xs font-bold">Day {$expedition.wilderness.day}</span>
-            {#if $isGM}
-              <button
-                class="border border-red-300 bg-red-50 text-red-800 rounded px-2 py-0.5 text-[9px]"
-                title="Return the expedition clock to Day 1 / Morning and clear day-scoped state"
-                on:click={resetDay}
-              >
-                Reset Day
-              </button>
-            {/if}
-          </div>
-        </div>
-
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2 text-xs">
-          <label>
-            Route
-            <select disabled={!$isGM} value={$expedition.wilderness.routeMode} on:change={onRouteChange}>
-              {#each ROUTES as route}<option value={route}>{route}</option>{/each}
-            </select>
-          </label>
-          <label>
-            Terrain
-            <select disabled={!$isGM} value={$expedition.wilderness.terrain} on:change={onTerrainChange}>
-              {#each TERRAINS as terrain}<option value={terrain}>{terrain}</option>{/each}
-            </select>
-          </label>
-          <label>
-            Climate / Season
-            <select
-              disabled={!$isGM || weatherReady}
-              value={$expedition.wilderness.climate}
-              on:change={onClimateChange}
-            >
-              {#each CLIMATES as climate}<option value={climate}>{climate}</option>{/each}
-            </select>
-          </label>
           <div>
-            <div class="font-bold">Weather</div>
-            {#if weatherReady}
-              <div class="border rounded px-1 py-0.5 bg-gray-50 min-h-[23px]">
-                {$expedition.wilderness.weather}
-              </div>
-              <div class="text-[9px] text-gray-500 mt-0.5">
-                2d6 {$expedition.wilderness.weatherNaturalRoll}
-                {#if $expedition.wilderness.weatherModifiedRoll !== $expedition.wilderness.weatherNaturalRoll}
-                  → {$expedition.wilderness.weatherModifiedRoll}
-                {/if}
-                · next {$expedition.wilderness.weatherModifier >= 0 ? "+" : ""}{$expedition.wilderness.weatherModifier}
-              </div>
-            {:else}
-              <button
-                class="border rounded px-2 py-1 w-full"
-                disabled={!$isGM}
-                on:click={rollWeather}
-              >
-                Roll Weather
-              </button>
-            {/if}
+            <h2>WILDERNESS TRAVEL</h2>
+            <div class="text-[10px] text-gray-500">Guided Travel Phase · dawn to dawn</div>
+          </div>
+          <div class="flex items-center gap-1">
+            <span class="status-chip">Day {$expedition.wilderness.day}</span>
+            <span class="status-chip">{$expedition.wilderness.quarter}</span>
+            <span class="status-chip">{$expedition.wilderness.routeMode}</span>
           </div>
         </div>
 
-        <div class="mt-2 border rounded-md p-2 bg-gray-50 text-xs">
-          <div class="flex flex-wrap items-end gap-2">
-            <label>
-              Pace
-              <select
-                disabled={!$isGM || paceReady}
-                value={$expedition.wilderness.pace}
-                on:change={onPaceChange}
-              >
-                {#each PACES as pace}<option value={pace}>{pace}</option>{/each}
-              </select>
-            </label>
-            {#if $expedition.wilderness.pace === "Forced"}
-              <label>
-                Travel Quarters
-                <select
-                  disabled={!$isGM || paceReady}
-                  value={$expedition.wilderness.forcedTravelTarget}
-                  on:change={onForcedTravelTargetChange}
-                >
-                  <option value="3">3</option>
-                  <option value="4">4</option>
-                </select>
-              </label>
-            {/if}
-            {#if $isGM}
-              {#if paceReady}
-                <button class="border rounded px-2 py-1" on:click={unlockPace}>Unlock Pace</button>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-1 mt-2 text-[10px]">
+          <div class="status-box">
+            <div class="status-label">Weather</div>
+            <div class="font-bold">{weatherReady ? $expedition.wilderness.weather : "Not rolled"}</div>
+          </div>
+          <div class="status-box">
+            <div class="status-label">Pace</div>
+            <div class="font-bold">{paceReady ? $expedition.wilderness.pace : "Not declared"}</div>
+          </div>
+          <div class="status-box">
+            <div class="status-label">Travel Today</div>
+            <div class="font-bold">{$expedition.wilderness.travelQuartersToday} / {paceTravelTarget} Quarters</div>
+          </div>
+          <div class="status-box">
+            <div class="status-label">Journey Progress</div>
+            <div class="font-bold">
+              {#if $expedition.wilderness.routeMode === "Known Route"}
+                {$expedition.wilderness.progress} / {$expedition.wilderness.routeTimeQuarters || "?"}
               {:else}
-                <button
-                  class="bg-black text-white rounded px-2 py-1"
-                  disabled={!weatherReady}
-                  on:click={declarePace}
-                >
-                  Declare Pace
-                </button>
+                {$expedition.wilderness.progress} successful
               {/if}
-            {/if}
-            <div class="ml-auto text-[10px] text-gray-600">
-              {$expedition.wilderness.travelQuartersToday} / {paceTravelTarget} planned travel Quarters today
             </div>
           </div>
-          <div class="text-[10px] text-gray-500 mt-1">
-            Cautious: 1 Quarter, Trailblaze/Keep Watch Advantage · Steady: 2 Quarters · Forced: 3–4 Quarters; the 3rd and 4th are Forced March.
+        </div>
+
+        <div class="workflow-card mt-2">
+          <div class="flex items-center justify-between gap-2">
+            <div>
+              <div class="text-[9px] uppercase tracking-wide text-gray-500">Current Step · {workflowStepNumber} of 5</div>
+              {#if workflowStep === "weather"}
+                <div class="font-bold text-sm">Dawn — Roll Weather</div>
+              {:else if workflowStep === "pace"}
+                <div class="font-bold text-sm">Dawn — Declare Pace</div>
+              {:else if workflowStep === "plan"}
+                <div class="font-bold text-sm">{$expedition.wilderness.quarter} — Plan Quarter</div>
+              {:else if workflowStep === "resolve"}
+                <div class="font-bold text-sm">{$expedition.wilderness.quarter} — Resolve Quarter</div>
+              {:else}
+                <div class="font-bold text-sm">{$expedition.wilderness.quarter} — Complete Quarter</div>
+              {/if}
+            </div>
+            <div class="text-[10px] text-gray-500">
+              {workflowStep === "weather" ? "Weather before Pace and Activities" :
+               workflowStep === "pace" ? "One Pace for the Travel Phase" :
+               workflowStep === "plan" ? "Everyone takes one Quarter Activity" :
+               workflowStep === "resolve" ? "Required Saves are resolving" :
+               "Advance when the Quarter is settled"}
+            </div>
           </div>
+
+          {#if workflowStep === "weather"}
+            <div class="mt-2 text-xs">
+              <div class="text-gray-600">Roll the persistent 2d6 weather front for Day {$expedition.wilderness.day}.</div>
+              {#if $isGM}
+                <button class="primary-action mt-2" on:click={rollWeather}>Roll Weather</button>
+              {/if}
+            </div>
+          {:else if workflowStep === "pace"}
+            <div class="mt-2 flex flex-wrap items-end gap-2 text-xs">
+              <label>
+                Pace
+                <select disabled={!$isGM} value={$expedition.wilderness.pace} on:change={onPaceChange}>
+                  {#each PACES as pace}<option value={pace}>{pace}</option>{/each}
+                </select>
+              </label>
+              {#if $expedition.wilderness.pace === "Forced"}
+                <label>
+                  Planned Travel Quarters
+                  <select disabled={!$isGM} value={$expedition.wilderness.forcedTravelTarget} on:change={onForcedTravelTargetChange}>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                  </select>
+                </label>
+              {/if}
+              <div class="text-[10px] text-gray-500 flex-1 min-w-[180px]">
+                Cautious: 1 Quarter · Steady: 2 Quarters · Forced: 3–4 Quarters; the 3rd and 4th are Forced March.
+              </div>
+              {#if $isGM}
+                <button class="primary-action" on:click={declarePace}>Declare Pace</button>
+              {/if}
+            </div>
+          {:else if workflowStep === "plan"}
+            <div class="mt-2">
+              <div class="text-[10px] text-gray-600 mb-1">
+                Everyone defaults to Travel. Change only the characters doing something else, then confirm the Quarter.
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-1">
+                {#each assignedCompany as entry (entry.member.id)}
+                  <div class="border rounded px-2 py-1 text-[10px] flex items-center gap-1 bg-white">
+                    <span class="font-bold truncate">{entry.member.name}</span>
+                    <span class="ml-auto">{entry.assignment.activity}</span>
+                    {#if entry.assignment.role}<span class="role-chip">{entry.assignment.role}</span>{/if}
+                  </div>
+                {/each}
+              </div>
+              {#if haltsForActivity}
+                <div class="mt-1 text-[10px] text-red-700 font-bold">
+                  Forage / Hunt / Fish halts the Company for this Quarter.
+                </div>
+              {/if}
+              {#if $isGM}
+                <button class="primary-action mt-2" on:click={beginQuarterResolution}>Confirm Quarter & Resolve</button>
+              {/if}
+            </div>
+          {:else if workflowStep === "resolve"}
+            <div class="mt-2 text-xs">
+              <div class="text-[10px] text-gray-600">
+                Required player roll requests were sent automatically. NPC rolls resolve on the GM client.
+              </div>
+              <div class="flex flex-col gap-1 mt-1">
+                {#each quarterTasks as task (task.id)}
+                  <div class="border rounded px-2 py-1 bg-white flex items-center gap-2">
+                    <span class="font-bold">{task.kind}</span>
+                    <span>— {task.playerName}</span>
+                    <span class="ml-auto text-[10px] uppercase">{task.status}</span>
+                    {#if task.response?.roll}
+                      <span class:font-bold={task.response.roll.success}>
+                        {task.response.roll.success ? "PASS" : "FAIL"}
+                      </span>
+                    {:else if memberForId(task.playerId)?.source === "npc" && task.attributeMode === "INT_OR_STR"}
+                      <button class="border rounded px-2 py-0.5 text-[10px]" on:click={() => resolveTask(task, "INT")}>INT</button>
+                      <button class="border rounded px-2 py-0.5 text-[10px]" on:click={() => resolveTask(task, "STR")}>STR</button>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+              {#if quarterMessage}<div class="mt-1 text-[10px]">{quarterMessage}</div>{/if}
+            </div>
+          {:else}
+            <div class="mt-2 text-xs">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-1">
+                {#each quarterTasks as task (task.id)}
+                  <div class="border rounded px-2 py-1 bg-white">
+                    <span class="font-bold">{task.kind}</span> — {task.playerName}
+                    {#if task.response?.roll}
+                      <span class:font-bold={task.response.roll.success}>
+                        · {task.response.roll.success ? "PASS" : "FAIL"}
+                      </span>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+              {#if forcedMarchFailures.length}
+                <div class="mt-2 border border-red-300 bg-red-50 rounded p-2 text-[10px] text-red-800">
+                  Forced March failure: {forcedMarchFailures.map((task) => task.playerName).join(", ")} gained 1 Fatigue and cannot travel another Quarter today.
+                </div>
+              {/if}
+              {#if $isGM}
+                <button
+                  class="primary-action mt-2"
+                  disabled={!allQuarterTasksDone}
+                  on:click={completeQuarter}
+                >
+                  Complete {$expedition.wilderness.quarter} Quarter
+                </button>
+              {/if}
+            </div>
+          {/if}
         </div>
 
         {#if dayMessage}
@@ -1359,12 +1456,7 @@
               {$expedition.wilderness.weatherExtremeCandidate}{ $expedition.wilderness.climate === "Tropical" ? " when the hot/dry season supports it" : ""}.
             </span>
             {#if $isGM}
-              <button
-                class="bg-black text-white rounded px-2 py-1 whitespace-nowrap"
-                on:click={applyWeatherExtremeCandidate}
-              >
-                Apply
-              </button>
+              <button class="bg-black text-white rounded px-2 py-1 whitespace-nowrap" on:click={applyWeatherExtremeCandidate}>Apply</button>
               <button class="border rounded px-2 py-1 whitespace-nowrap" on:click={keepClearWeather}>Keep Clear</button>
             {/if}
           </div>
@@ -1384,42 +1476,73 @@
           </div>
         {/if}
 
-        <div class="mt-2 text-xs">
-          <div class="font-bold mb-0.5">Journey</div>
-          <div class="grid grid-cols-[1fr_auto_1fr] gap-2 items-center">
-            <input
-              disabled={!$isGM}
-              value={$expedition.wilderness.currentLocation}
-              placeholder="Origin"
-              aria-label="Journey origin"
-              on:change={(e) => patchWilderness({ currentLocation: e.currentTarget.value })}
-            />
-            <i class="material-icons text-base text-gray-500">arrow_forward</i>
-            <input
-              disabled={!$isGM}
-              value={$expedition.wilderness.destination}
-              placeholder="Destination"
-              aria-label="Journey destination"
-              on:change={(e) => patchWilderness({ destination: e.currentTarget.value })}
-            />
-          </div>
-        </div>
-
-        {#if $expedition.wilderness.routeMode === "Known Route"}
-          <label class="block mt-2 text-xs max-w-[180px]">
-            Recorded Route Time
-            <div class="flex items-center gap-1">
-              <input
-                type="number"
-                min="0"
-                disabled={!$isGM}
-                value={$expedition.wilderness.routeTimeQuarters}
-                on:change={(e) => patchWilderness({ routeTimeQuarters: parseInt(e.currentTarget.value) || 0 })}
-              />
-              <span class="text-[10px] text-gray-500 whitespace-nowrap">Quarters</span>
+        <details class="mt-2 border rounded-md bg-gray-50">
+          <summary class="px-2 py-1 text-xs font-bold cursor-pointer">Journey Setup & GM Tools</summary>
+          <div class="p-2 pt-1 text-xs">
+            <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
+              <label>
+                Route
+                <select disabled={!$isGM} value={$expedition.wilderness.routeMode} on:change={onRouteChange}>
+                  {#each ROUTES as route}<option value={route}>{route}</option>{/each}
+                </select>
+              </label>
+              <label>
+                Terrain
+                <select disabled={!$isGM} value={$expedition.wilderness.terrain} on:change={onTerrainChange}>
+                  {#each TERRAINS as terrain}<option value={terrain}>{terrain}</option>{/each}
+                </select>
+              </label>
+              <label>
+                Climate / Season
+                <select disabled={!$isGM || weatherReady} value={$expedition.wilderness.climate} on:change={onClimateChange}>
+                  {#each CLIMATES as climate}<option value={climate}>{climate}</option>{/each}
+                </select>
+              </label>
             </div>
-          </label>
-        {/if}
+
+            <div class="grid grid-cols-[1fr_auto_1fr] gap-2 items-center mt-2">
+              <input
+                disabled={!$isGM}
+                value={$expedition.wilderness.currentLocation}
+                placeholder="Origin"
+                aria-label="Journey origin"
+                on:change={(e) => patchWilderness({ currentLocation: e.currentTarget.value })}
+              />
+              <i class="material-icons text-base text-gray-500">arrow_forward</i>
+              <input
+                disabled={!$isGM}
+                value={$expedition.wilderness.destination}
+                placeholder="Destination"
+                aria-label="Journey destination"
+                on:change={(e) => patchWilderness({ destination: e.currentTarget.value })}
+              />
+            </div>
+
+            {#if $expedition.wilderness.routeMode === "Known Route"}
+              <label class="block mt-2 max-w-[180px]">
+                Recorded Route Time
+                <div class="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min="0"
+                    disabled={!$isGM}
+                    value={$expedition.wilderness.routeTimeQuarters}
+                    on:change={(e) => patchWilderness({ routeTimeQuarters: parseInt(e.currentTarget.value) || 0 })}
+                  />
+                  <span class="text-[10px] text-gray-500">Quarters</span>
+                </div>
+              </label>
+            {/if}
+
+            {#if $isGM}
+              <div class="flex flex-wrap gap-1 mt-2 pt-2 border-t">
+                {#if paceReady}<button class="border rounded px-2 py-1 text-[10px]" on:click={unlockPace}>Unlock Pace</button>{/if}
+                <button class="border border-red-300 bg-red-50 text-red-800 rounded px-2 py-1 text-[10px]" on:click={resetTravel}>Reset Travel</button>
+                <button class="border border-red-300 bg-red-50 text-red-800 rounded px-2 py-1 text-[10px]" on:click={resetDay}>Reset Day</button>
+              </div>
+            {/if}
+          </div>
+        </details>
 
         <div class="mt-3">
           <div class="flex items-center justify-between text-xs mb-1">
@@ -1432,170 +1555,73 @@
           </div>
           <div class="grid grid-cols-4 gap-1">
             {#each QUARTERS as q}
-              <button
-                class="rounded-md border px-2 py-2 text-xs"
+              <div
+                class="rounded-md border px-2 py-2 text-xs text-center"
                 class:bg-black={$expedition.wilderness.quarter === q}
                 class:text-white={$expedition.wilderness.quarter === q}
                 class:bg-gray-100={quarterIndex(q) < quarterIndex($expedition.wilderness.quarter)}
-                disabled={!$isGM}
-                on:click={() => patchWilderness({ quarter: q })}
               >
                 {q}
-              </button>
+              </div>
             {/each}
           </div>
         </div>
 
-        {#key JSON.stringify($expedition.wilderness.assignments)}
-          <div class="mt-3">
-            <div class="flex items-center justify-between gap-2 mb-1">
-              <div>
-                <div class="font-bold text-xs">Travel Roles</div>
-                <div class="text-[10px] text-gray-500">Roles are performed while Traveling; each role accepts one character.</div>
+        <div class="mt-3 border rounded-md p-2 bg-gray-50">
+          <div class="flex items-center justify-between gap-2">
+            <div>
+              <div class="font-bold text-xs">Quarter Plan Summary</div>
+              <div class="text-[10px] text-gray-500">Edit the plan in the right-hand Company panel. Travel Roles do not consume the Travel Activity.</div>
+            </div>
+            {#if haltsForActivity}
+              <span class="text-[10px] font-bold text-red-700">Company halts this Quarter</span>
+            {/if}
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-1 mt-1">
+            {#each assignedCompany as entry (entry.member.id)}
+              <div class="border rounded px-2 py-1 bg-white text-[10px] flex items-center gap-1">
+                <span class="font-bold truncate">{entry.member.name}</span>
+                <span class="ml-auto">{entry.assignment.activity}</span>
+                {#if entry.assignment.role}<span class="role-chip">{entry.assignment.role}</span>{/if}
+                {#if entry.assignment.activity === "Make Camp" && entry.member.id === effectiveMakeCampLeaderId}
+                  <span class="role-chip">Lead</span>
+                {/if}
               </div>
-              {#if $isGM}
-                <button
-                  class="border border-red-300 bg-red-50 text-red-800 rounded-md px-2 py-1 text-[10px]"
-                  title="Clear all current Quarter Activities and Travel Roles"
-                  on:click={resetTravel}
-                >
-                  Reset Travel
-                </button>
-              {/if}
-            </div>
+            {/each}
+          </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-1">
-              {#each roleCards as card (card.role)}
-                <div class="assignment-card">
-                  <div class="font-bold text-xs">{card.role}</div>
-                  {#if card.assignment}
-                    <div class="flex items-center gap-1 mt-1 text-xs">
-                      <i class="material-icons text-sm">person</i>
-                      <span class="truncate">{card.member?.name ?? "Disconnected character"}</span>
-                      {#if card.member?.source === "npc"}
-                        <span class="role-chip">NPC</span>
-                      {/if}
-                    </div>
-                    {#if card.member?.npc}
-                      <div class="text-[9px] text-gray-500 mt-0.5">{card.member.npc.kind}</div>
-                    {/if}
-                  {:else}
-                    <div class="text-[10px] text-gray-400 mt-1">Unassigned</div>
-                  {/if}
-                </div>
-              {/each}
-            </div>
-
-            <div class="mt-1 grid grid-cols-1 md:grid-cols-2 gap-1">
+          <details class="mt-2">
+            <summary class="text-[10px] font-bold cursor-pointer">Interrupts & Role Status</summary>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-1 mt-1">
               <div class="border rounded-md p-2 bg-white text-[10px]">
                 <div class="flex items-center gap-2">
-                  <span class="font-bold">Keep Watch Trigger</span>
+                  <span class="font-bold">Keep Watch</span>
+                  <span>{keepWatchMember?.name ?? "Unassigned"}</span>
                   {#if $isGM}
-                    <button
-                      class="ml-auto border rounded px-2 py-1"
-                      on:click={triggerKeepWatch}
-                    >
-                      Trigger Keep Watch
-                    </button>
+                    <button class="ml-auto border rounded px-2 py-1" on:click={triggerKeepWatch}>Trigger</button>
                   {/if}
                 </div>
-                <div class="text-gray-500 mt-0.5">
-                  Roll only when something would otherwise surprise the Company.
-                </div>
-                {#if watchTask}
-                  <div class="mt-1">
-                    {watchTask.playerName}: {watchTask.status}
-                    {#if watchTask.response?.roll}
-                      — d20 {watchTask.response.roll.natural} → {watchTask.response.roll.total}
-                      <span class:font-bold={watchTask.response.roll.success}>
-                        {watchTask.response.roll.success ? " SUCCESS" : " FAILURE"}
-                      </span>
-                    {/if}
-                  </div>
-                {/if}
-                {#if watchMessage}
-                  <div class="mt-1">{watchMessage}</div>
-                {/if}
+                {#if watchMessage}<div class="mt-1">{watchMessage}</div>{/if}
               </div>
-
               <div class="border rounded-md p-2 bg-white text-[10px]">
-                <div class="font-bold">Quartermaster Coverage</div>
+                <div class="font-bold">Quartermaster</div>
                 {#if quartermasterMember}
-                  <div class="mt-0.5">
-                    {quartermasterMember.name} · {$expedition.wilderness.quartermasterCoveredTravelQuarters}
-                    / {$expedition.wilderness.travelQuartersToday} completed travel Quarters
-                  </div>
-                  <div
-                    class="mt-0.5"
-                    class:text-green-700={quartermasterBenefitActiveSoFar}
-                    class:text-red-700={$expedition.wilderness.quartermasterMissedToday}
-                  >
-                    {quartermasterBenefitActiveSoFar
-                      ? "Active so far: ordinary daily Ration/Water Usage will step on 1–2."
-                      : $expedition.wilderness.quartermasterMissedToday
-                        ? "Daily Quartermaster benefit has been missed."
-                        : "Coverage is being established."}
-                  </div>
+                  <div>{quartermasterMember.name} · {$expedition.wilderness.quartermasterCoveredTravelQuarters}/{$expedition.wilderness.travelQuartersToday} travel Quarters covered</div>
                 {:else}
-                  <div class="text-gray-500 mt-0.5">
-                    No completed travel Quarter has established Quartermaster coverage today.
-                  </div>
+                  <div class="text-gray-500">No daily coverage established yet.</div>
                 {/if}
               </div>
             </div>
-          </div>
-
-          <div class="mt-3">
-            <div class="flex items-center justify-between gap-2">
-              <div>
-                <div class="font-bold text-xs">Quarter Activities</div>
-                <div class="text-[10px] text-gray-500">Each character takes one Activity this Quarter.</div>
-              </div>
-              {#if haltsForActivity}
-                <div class="text-[10px] font-bold text-red-700 border border-red-300 bg-red-50 rounded px-2 py-1">
-                  Company halts — no travel progress this Quarter.
-                </div>
-              {/if}
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-1 mt-1">
-              {#each activityCards as card (card.activity)}
-                <div class="assignment-card min-h-[74px]">
-                  <div class="font-bold text-xs">{card.activity}</div>
-                  {#if card.members.length}
-                    <div class="flex flex-col gap-1 mt-1">
-                      {#each card.members as entry (entry.member.id)}
-                        <div class="flex items-center gap-1 text-xs min-w-0">
-                          <i class="material-icons text-sm">person</i>
-                          <span class="truncate">{entry.member.name}</span>
-                          {#if entry.assignment.role}
-                            <span class="role-chip">{entry.assignment.role}</span>
-                          {/if}
-                        </div>
-                      {/each}
-                    </div>
-                  {:else}
-                    <div class="text-[10px] text-gray-400 mt-1">—</div>
-                  {/if}
-                </div>
-              {/each}
-            </div>
-          </div>
-        {/key}
+          </details>
+        </div>
 
         {#if $isGM}
           <div class="mt-3 border rounded-md p-2 bg-gray-50">
-            <div class="flex items-center justify-between gap-2">
-              <div>
-                <div class="font-bold text-xs">Resolve Quarter</div>
-                <div class="text-[10px] text-gray-500">
-                  Pace, Weather, terrain pressure, Wilderness Craft, and Forced March are active. Wilderness Events and supply consumption come next.
-                </div>
+            <details open={quarterPlanActive}>
+              <summary class="font-bold text-xs cursor-pointer">Resolution Details / Retry Rolls</summary>
+              <div class="text-[10px] text-gray-500 mt-1">
+                Normal roll requests are sent when you confirm the Quarter. Use these controls only for retries or NPC choices.
               </div>
-              <button class="bg-black text-white rounded-md px-3 py-1 text-xs" on:click={planQuarterResolution}>
-                {quarterPlanActive ? "Rebuild Plan" : "Resolve Quarter"}
-              </button>
-            </div>
 
             {#if quarterMessage}
               <div class="text-[10px] mt-2 border rounded px-2 py-1 bg-white">{quarterMessage}</div>
@@ -1674,17 +1700,9 @@
                 </div>
               {/if}
 
-              <button
-                class="mt-2 rounded-md px-3 py-1 text-xs"
-                class:bg-green-600={allQuarterTasksDone}
-                class:text-white={allQuarterTasksDone}
-                class:bg-gray-200={!allQuarterTasksDone}
-                disabled={!allQuarterTasksDone}
-                on:click={completeQuarter}
-              >
-                Complete {$expedition.wilderness.quarter} Quarter
-              </button>
+
             {/if}
+            </details>
           </div>
         {/if}
       </div>
@@ -1772,9 +1790,9 @@
           </div>
         {/if}
 
-        <h2>COMPANY ASSIGNMENTS</h2>
+        <h2>QUARTER PLAN</h2>
         <div class="text-[10px] text-gray-500 mb-1">
-          Choose each member's Quarter Activity and optional Travel Role. Everyone defaults to Travel.
+          Everyone defaults to Travel. Change only the members doing something different, then use the Current Step card to continue.
         </div>
         <div class="text-[9px] text-gray-400 mb-2">
           Owlbear party: {$PartyStore.filter((p) => p.role === "PLAYER").length}
@@ -2061,6 +2079,26 @@
 
   .role-chip {
     @apply ml-auto text-[9px] px-1 rounded bg-black text-white whitespace-nowrap;
+  }
+
+  .workflow-card {
+    @apply border-2 border-black rounded-lg p-3 bg-white;
+  }
+
+  .primary-action {
+    @apply bg-black text-white rounded-md px-3 py-1.5 text-xs font-bold disabled:bg-gray-300 disabled:text-gray-500;
+  }
+
+  .status-chip {
+    @apply border rounded px-2 py-1 text-[10px] font-bold bg-gray-50 whitespace-nowrap;
+  }
+
+  .status-box {
+    @apply border rounded-md px-2 py-1 bg-gray-50 min-w-0;
+  }
+
+  .status-label {
+    @apply text-[9px] uppercase tracking-wide text-gray-500;
   }
 
   input,
