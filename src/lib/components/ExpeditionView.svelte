@@ -692,12 +692,21 @@
     await patchWilderness({ makeCampLeaderId: playerId });
   }
 
-  async function resetAssignments() {
+  async function resetTravel() {
     if (!$isGM) return;
+
+    // Reset only the current Quarter's declared setup. Do not touch the
+    // expedition clock, weather, pace, progress, completed Quartermaster
+    // coverage, daily Forced March state, PCs, or Company NPCs.
     clearQuarterPlan();
     watchTask = null;
     watchMessage = "";
-    await patchWilderness({ assignments: [], makeCampLeaderId: "" });
+    dayMessage = "";
+
+    await patchWilderness({
+      assignments: [],
+      makeCampLeaderId: "",
+    });
   }
 
   function makeTask(
@@ -1406,7 +1415,13 @@
                 <div class="text-[10px] text-gray-500">Roles are performed while Traveling; each role accepts one character.</div>
               </div>
               {#if $isGM}
-                <button class="border rounded-md px-2 py-1 text-[10px]" on:click={resetAssignments}>Reset Assignments</button>
+                <button
+                  class="border border-red-300 bg-red-50 text-red-800 rounded-md px-2 py-1 text-[10px]"
+                  title="Clear all current Quarter Activities and Travel Roles"
+                  on:click={resetTravel}
+                >
+                  Reset Travel
+                </button>
               {/if}
             </div>
 
