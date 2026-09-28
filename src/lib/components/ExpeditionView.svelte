@@ -93,6 +93,7 @@
     "Hunt",
     "Fish",
     "Make Camp",
+    "Stand Watch",
     "Sleep",
     "Other",
   ];
@@ -183,6 +184,10 @@
   $: keepWatchMember = keepWatchAssignment
     ? company.find((member) => member.id === keepWatchAssignment.playerId)
     : undefined;
+  $: standWatchAssignment = currentAssignments.find((a) => a.activity === "Stand Watch");
+  $: standWatchMember = standWatchAssignment
+    ? company.find((member) => member.id === standWatchAssignment.playerId)
+    : undefined;
   $: quartermasterMember = $expedition.wilderness.quartermasterTodayId
     ? company.find((member) => member.id === $expedition.wilderness.quartermasterTodayId)
     : undefined;
@@ -204,6 +209,20 @@
   );
   $: travelingThisQuarter =
     !haltsForActivity && assignedCompany.some(({ assignment }) => assignment.activity === "Travel");
+  $: mixedTravelPlan =
+    !haltsForActivity &&
+    assignedCompany.some(({ assignment }) => assignment.activity === "Travel") &&
+    assignedCompany.some(({ assignment }) =>
+      ["Make Camp", "Stand Watch", "Sleep", "Other"].includes(assignment.activity),
+    );
+  $: activeWatchMember = travelingThisQuarter ? keepWatchMember : standWatchMember;
+  $: activeWatchMode = travelingThisQuarter
+    ? keepWatchMember
+      ? "Travel Keep Watch"
+      : ""
+    : standWatchMember
+      ? "Camp Stand Watch"
+      : "";
   $: forcedMarchFailures = quarterTasks.filter(
     (task) => task.kind === "Forced March" && task.response?.roll?.success === false,
   );
@@ -606,6 +625,17 @@
     return npc.kind === "Professional Quartermaster" || npc.quartermasterQualified;
   }
 
+  function standWatchEligible(member: CompanyMember): boolean {
+    if (member.source === "player") return true;
+    const npc = member.npc;
+    if (!npc) return false;
+    return (
+      npc.kind === "Scout Henchman" ||
+      npc.kind === "Apprentice" ||
+      (npc.kind === "Other" && npc.detectionRank > 0)
+    );
+  }
+
   function makeCampLeadEligible(member: CompanyMember): boolean {
     if (member.source === "player") return true;
     const npc = member.npc;
@@ -744,7 +774,13 @@
     clearQuarterPlan();
     const activity = (e.currentTarget as HTMLSelectElement).value as WildernessActivity;
     const current = assignmentFor(playerId);
+    const member = memberForId(playerId);
     let role = current.role;
+
+    if (activity === "Stand Watch" && member && !standWatchEligible(member)) {
+      quarterMessage = `${member.name} is not eligible to Stand Watch with their current NPC Job/Type.`;
+      return;
+    }
 
     if ((role === "Trailblazer" || role === "Keep Watch") && activity !== "Travel") {
       role = undefined;
@@ -753,7 +789,17 @@
       role = undefined;
     }
 
-    const others = $expedition.wilderness.assignments.filter((a) => a.playerId !== playerId);
+    let others = $expedition.wilderness.assignments.filter((a) => a.playerId !== playerId);
+    if (activity === "Stand Watch") {
+      // Camp watch is one active watcher for the Quarter. Do not silently
+      // leave a second Stand Watch assignment behind.
+      others = others.map((assignment) =>
+        assignment.activity === "Stand Watch"
+          ? { ...assignment, activity: "Sleep" as WildernessActivity }
+          : assignment,
+      );
+    }
+
     const makeCampLeaderId =
       activity !== "Make Camp" && $expedition.wilderness.makeCampLeaderId === playerId
         ? ""
@@ -888,6 +934,14 @@
       quarterPlanActive = false;
       quarterTasks = [];
       quarterMessage = "No Company members are available to resolve this Quarter.";
+      return;
+    }
+
+    if (mixedTravelPlan) {
+      quarterPlanActive = false;
+      quarterTasks = [];
+      quarterMessage =
+        "This plan mixes Travel with Sleep, Stand Watch, Make Camp, or Other. That would split the Company, which this board does not model. Set the whole Company to a halted plan, or keep everyone moving.";
       return;
     }
 
@@ -1232,23 +1286,31 @@
     watchTask = null;
     watchMessage = "";
 
-    if (!keepWatchMember) {
+    const watcher = activeWatchMember;
+    if (!watcher) {
       watchMessage = "No one is on Watch. If this trigger would surprise the Company, the Company is surprised automatically.";
       return;
     }
-    if (!roleEligible(keepWatchMember, "Keep Watch")) {
-      watchMessage = `${keepWatchMember.name} is not eligible to serve as Keep Watch.`;
+
+    if (travelingThisQuarter) {
+      if (!roleEligible(watcher, "Keep Watch")) {
+        watchMessage = `${watcher.name} is not eligible to serve as Keep Watch while traveling.`;
+        return;
+      }
+    } else if (!standWatchEligible(watcher)) {
+      watchMessage = `${watcher.name} is not eligible to Stand Watch with their current NPC Job/Type.`;
       return;
     }
 
-    const cautiousAdvantage = $expedition.wilderness.pace === "Cautious";
+    const cautiousAdvantage = travelingThisQuarter && $expedition.wilderness.pace === "Cautious";
     const weatherDisadvantage = weatherDisadvantages("Keep Watch");
-    const task = makeTask("Keep Watch", keepWatchMember, "INT", {
+    const task = makeTask("Keep Watch", watcher, "INT", {
       skill: "Detection",
       untrainedDisadvantage: true,
       hasAdvantage: cautiousAdvantage,
       hasDisadvantage: weatherDisadvantage,
       note:
+        `${activeWatchMode ? `${activeWatchMode}. ` : ""}` +
         `${cautiousAdvantage ? "Cautious Pace grants Advantage. " : ""}` +
         `${weatherDisadvantage ? `${$expedition.wilderness.weather} imposes Disadvantage. ` : ""}` +
         "Roll only when something would otherwise surprise the Company.",
@@ -1735,7 +1797,7 @@
           <div class="flex items-center justify-between gap-2">
             <div>
               <div class="font-bold text-xs">Quarter Plan Summary</div>
-              <div class="text-[10px] text-gray-500">Edit the plan in the right-hand Company panel. Travel Roles do not consume the Travel Activity.</div>
+              <div class="text-[10px] text-gray-500">Edit the plan in the right-hand Company panel. Travel Roles apply only while moving; Stand Watch is the non-travel camp watch Activity.</div>
             </div>
             {#if haltsForActivity}
               <span class="text-[10px] font-bold text-red-700">Company halts this Quarter</span>
@@ -1759,17 +1821,23 @@
             <div class="grid grid-cols-1 md:grid-cols-2 gap-1 mt-1">
               <div class="border rounded-md p-2 bg-white text-[10px]">
                 <div class="flex items-center gap-2">
-                  <span class="font-bold">Keep Watch</span>
-                  <span>{keepWatchMember?.name ?? "Unassigned"}</span>
-                  {#if keepWatchMember}<span class="role-chip">Armed</span>{/if}
+                  <span class="font-bold">Watch</span>
+                  <span>{activeWatchMember?.name ?? "Unassigned"}</span>
+                  {#if activeWatchMember}<span class="role-chip">{activeWatchMode}</span>{/if}
                   {#if $isGM}
                     <button class="ml-auto border rounded px-2 py-1" title="GM override/test: roll only when something would otherwise surprise the Company" on:click={triggerKeepWatch}>Trigger</button>
                   {/if}
                 </div>
                 <div class="text-gray-500 mt-0.5">
-                  {keepWatchMember
-                    ? "No Quarter roll. Keep Watch rolls only when something would otherwise surprise the Company."
-                    : "No watcher assigned; a surprise trigger leaves the Company automatically surprised."}
+                  {#if travelingThisQuarter}
+                    {keepWatchMember
+                      ? "Travel Keep Watch is armed. No Quarter roll; roll only on a surprise trigger."
+                      : "No traveling watcher assigned; a surprise trigger leaves the Company automatically surprised."}
+                  {:else}
+                    {standWatchMember
+                      ? "Camp Stand Watch is armed while the rest of the Company may Sleep. The watcher does not Sleep this Quarter."
+                      : "No camp watcher assigned; choose Stand Watch as a Quarter Activity if someone remains awake."}
+                  {/if}
                 </div>
                 {#if watchMessage}<div class="mt-1">{watchMessage}</div>{/if}
               </div>
@@ -2010,13 +2078,19 @@
 
                 <label class="block mt-1">
                   Travel Role
-                  <select disabled={!$isGM} value={assignment.role ?? ""} on:change={(e) => onRoleChange(p.id, e)}>
+                  <select disabled={!$isGM || assignment.activity !== "Travel"} value={assignment.role ?? ""} on:change={(e) => onRoleChange(p.id, e)}>
                     <option value="">None</option>
                     {#each ROLES as role}
                       <option value={role} disabled={!roleEligible(p, role)}>{role}</option>
                     {/each}
                   </select>
                 </label>
+
+                {#if assignment.activity === "Stand Watch"}
+                  <div class="mt-1 text-[9px] text-gray-500">
+                    Camp watch. This character stays awake; use the Watch trigger only if something would otherwise surprise the Company.
+                  </div>
+                {/if}
 
                 {#if assignment.activity === "Make Camp"}
                   <div class="mt-1 flex items-center gap-1 text-[10px]">

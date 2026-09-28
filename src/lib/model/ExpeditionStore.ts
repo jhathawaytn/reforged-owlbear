@@ -21,6 +21,7 @@ export type WildernessActivity =
   | "Hunt"
   | "Fish"
   | "Make Camp"
+  | "Stand Watch"
   | "Sleep"
   | "Other";
 
