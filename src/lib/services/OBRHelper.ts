@@ -10,6 +10,7 @@ import type { ReforgedCharacter } from "../types";
 import { NOTIFICATION_KEY, showPopover } from "./Notifier";
 import { initExpeditionStore } from "../model/ExpeditionStore";
 import { initExpeditionRolls } from "./ExpeditionRolls";
+import { initExpeditionDaily } from "./ExpeditionDaily";
 
 const PLUGIN_ID = "rodeo.owlbear.reforged-sheet";
 
@@ -67,6 +68,7 @@ export async function init() {
     initPartyPresence();
     initReforgedPresence();
     initExpeditionRolls();
+    initExpeditionDaily();
     await initExpeditionStore();
 
     if (get(isGM)) {

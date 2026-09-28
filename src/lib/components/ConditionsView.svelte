@@ -5,6 +5,16 @@
   import type { ConditionId } from "../types";
 
   function toggle(id: ConditionId) {
+    if (id === "Deprived") {
+      if ($pc.conditions.includes(id)) {
+        $pc.conditions = $pc.conditions.filter((c) => c !== id);
+        $pc.deprivationCauses = [];
+      } else {
+        $pc.conditions = [...$pc.conditions, id];
+        $pc.deprivationCauses = ["Manual"];
+      }
+      return;
+    }
     $pc.conditions = $pc.conditions.includes(id)
       ? $pc.conditions.filter((c) => c !== id)
       : [...$pc.conditions, id];

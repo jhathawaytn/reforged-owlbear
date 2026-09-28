@@ -24,6 +24,7 @@
     type WildernessRole,
     type CompanyNpc,
     type CompanyNpcKind,
+    type RestQuality,
   } from "../model/ExpeditionStore";
   import {
     PendingExpeditionRollStore,
@@ -39,6 +40,18 @@
     resolveExpeditionOutcome,
   } from "../services/ExpeditionRolls";
   import { rollDiceValues, rollReforgedSave } from "../services/DicePlus";
+  import { PlayerCharacterStore as localPc } from "../model/ReforgedCharacter";
+  import type { Attribute } from "../types";
+  import { lostAttributes } from "../services/RestRecovery";
+  import {
+    PendingExpeditionDailyStore,
+    LastExpeditionDailyStore,
+    requestExpeditionDaily,
+    resolvePendingConsumption,
+    resolvePendingRest,
+    applyDayCloseout,
+    type ExpeditionDailyResponse,
+  } from "../services/ExpeditionDaily";
   import { newId } from "../utils";
 
   type TravelWorkflowStep =
@@ -116,6 +129,13 @@
   let watchMessage = "";
   let watchTask: QuarterTask | null = null;
   let playerRollBusy = false;
+  let dailyBusy = false;
+  let rationChoice = "";
+  let waterChoice = "";
+  let restAttributeChoice: Attribute = "STR";
+  let manualRestQuality: RestQuality = "Perilous";
+  const pendingConsumptionIds = new Set<string>();
+  const pendingRestIds = new Set<string>();
   let npcName = "";
   let npcKind: CompanyNpcKind = "Guide Hireling";
   let npcLevel = 1;
@@ -180,7 +200,9 @@
     const member = assignment ? company.find((p) => p.id === assignment.playerId) : undefined;
     return { role, assignment, member };
   });
-  $: keepWatchAssignment = currentAssignments.find((a) => a.role === "Keep Watch");
+  $: keepWatchAssignment = currentAssignments.find(
+    (a) => a.role === "Keep Watch" && a.activity === "Travel",
+  );
   $: keepWatchMember = keepWatchAssignment
     ? company.find((member) => member.id === keepWatchAssignment.playerId)
     : undefined;
@@ -223,13 +245,45 @@
     : standWatchMember
       ? "Camp Stand Watch"
       : "";
+  $: playerMembers = company.filter((member) => member.source === "player");
+  $: sleeperEntries = assignedCompany.filter(({ assignment }) => assignment.activity === "Sleep");
+  $: playerSleeperIds = sleeperEntries
+    .filter(({ member }) => member.source === "player")
+    .map(({ member }) => member.id);
+  $: npcSleeperIds = sleeperEntries
+    .filter(({ member }) => member.source === "npc")
+    .map(({ member }) => member.id);
+  $: restQualityReady =
+    $expedition.wilderness.campRestQualityDay === $expedition.wilderness.day &&
+    !!$expedition.wilderness.campRestQuality;
+  $: quarterRequiresConsumption =
+    (makeCampEntries.length > 0 ||
+      (quarterIndex($expedition.wilderness.quarter) >= quarterIndex("Evening") && !travelingThisQuarter)) &&
+    (!dailyConsumptionReady || !extraWaterReady);
+  $: dailyConsumptionReady = playerMembers.every((member) =>
+    $expedition.wilderness.consumptionResolvedPlayerIds.includes(member.id),
+  );
+  $: extraWaterReady = playerMembers.every((member) => {
+    const heatExtra = $expedition.wilderness.weatherEffect === "heat-wave" ? 2 : 0;
+    const required =
+      ($expedition.wilderness.forcedMarchAttemptsByPlayer[member.id] ?? 0) + heatExtra;
+    const resolved = $expedition.wilderness.extraWaterRollsResolvedByPlayer[member.id] ?? 0;
+    return resolved >= required;
+  });
+  $: sleepersResolved = playerSleeperIds.every((id) =>
+    $expedition.wilderness.sleptPlayerIdsToday.includes(id),
+  ) && npcSleeperIds.every((id) =>
+    $expedition.wilderness.sleptPlayerIdsToday.includes(id),
+  );
   $: forcedMarchFailures = quarterTasks.filter(
     (task) => task.kind === "Forced March" && task.response?.roll?.success === false,
   );
   $: allQuarterTasksDone =
     quarterPlanActive &&
     quarterTasks.every((task) => task.status === "done") &&
-    forcedMarchFailures.length === 0;
+    forcedMarchFailures.length === 0 &&
+    (!quarterRequiresConsumption || (dailyConsumptionReady && extraWaterReady)) &&
+    (!sleeperEntries.length || (restQualityReady && sleepersResolved));
   $: paceTravelTarget =
     $expedition.wilderness.pace === "Cautious"
       ? 1
@@ -266,6 +320,41 @@
     workflowStep === "pace" ? 5 :
     workflowStep === "plan" ? 6 :
     workflowStep === "resolve" ? 7 : 8;
+
+  $: localRationItems = $localPc.gear.filter(
+    (item) => item.usageKind === "Rations" && item.usageDie && item.usageDie !== "depleted",
+  );
+  $: localWaterItems = $localPc.gear.filter(
+    (item) => item.usageKind === "Water" && item.usageDie && item.usageDie !== "depleted",
+  );
+  $: localLostAttributes = lostAttributes($localPc);
+  let preparedDailyRequestId = "";
+  $: if ($PendingExpeditionDailyStore && $PendingExpeditionDailyStore.requestId !== preparedDailyRequestId) {
+    preparedDailyRequestId = $PendingExpeditionDailyStore.requestId;
+    dailyBusy = false;
+    if ($PendingExpeditionDailyStore.kind === "Consumption") {
+      rationChoice = $PendingExpeditionDailyStore.ordinaryRequired
+        ? localRationItems[0]?.id ?? "none"
+        : "none";
+      waterChoice =
+        ($PendingExpeditionDailyStore.ordinaryRequired || $PendingExpeditionDailyStore.extraWaterRolls > 0)
+          ? localWaterItems[0]?.id ?? "none"
+          : "none";
+    } else if (
+      $PendingExpeditionDailyStore.quality === "Comfortable" &&
+      localLostAttributes.length
+    ) {
+      restAttributeChoice = localLostAttributes[0];
+    }
+  }
+  $: if (
+    $PendingExpeditionDailyStore?.kind === "Rest" &&
+    $PendingExpeditionDailyStore.quality === "Comfortable" &&
+    localLostAttributes.length &&
+    !localLostAttributes.includes(restAttributeChoice)
+  ) {
+    restAttributeChoice = localLostAttributes[0];
+  }
 
   async function setMode(mode: ExpeditionMode) {
     if (!$isGM) return;
@@ -685,6 +774,7 @@
       quartermasterQualified: npcKind === "Professional Quartermaster",
       fatigue: 0,
       notes: npcNotes.trim(),
+      deprivedFromRest: false,
     };
     await patchWilderness({ companyNpcs: [...$expedition.wilderness.companyNpcs, npc] });
     npcName = "";
@@ -782,13 +872,9 @@
       return;
     }
 
-    if ((role === "Trailblazer" || role === "Keep Watch") && activity !== "Travel") {
-      role = undefined;
-    }
-    if (role === "Quartermaster" && incompatibleWithQuartermaster(activity)) {
-      role = undefined;
-    }
-
+    // Travel Roles are retained as the character's carried-forward preference,
+    // but only become active while that character's Activity is Travel.
+    // This lets Night Sleep/Stand Watch return to the prior travel setup next day.
     let others = $expedition.wilderness.assignments.filter((a) => a.playerId !== playerId);
     if (activity === "Stand Watch") {
       // Camp watch is one active watcher for the Quarter. Do not silently
@@ -891,6 +977,188 @@
       quartermasterTodayId: "",
       quartermasterCoveredTravelQuarters: 0,
       quartermasterMissedToday: false,
+      campRestQuality: "",
+      campRestQualityDay: 0,
+      consumptionResolvedPlayerIds: [],
+      foodSatisfiedPlayerIds: [],
+      waterSatisfiedPlayerIds: [],
+      extraWaterRollsResolvedByPlayer: {},
+      forcedMarchAttemptsByPlayer: {},
+      forcedMarchAttemptKeys: [],
+      sleptPlayerIdsToday: [],
+    });
+  }
+
+  function heatExtraWaterRolls(): number {
+    return $expedition.wilderness.weatherEffect === "heat-wave" ? 2 : 0;
+  }
+
+  function requiredExtraWaterRolls(playerId: string): number {
+    return (
+      ($expedition.wilderness.forcedMarchAttemptsByPlayer[playerId] ?? 0) +
+      heatExtraWaterRolls()
+    );
+  }
+
+  function unresolvedExtraWaterRolls(playerId: string): number {
+    return Math.max(
+      0,
+      requiredExtraWaterRolls(playerId) -
+        ($expedition.wilderness.extraWaterRollsResolvedByPlayer[playerId] ?? 0),
+    );
+  }
+
+  async function recordConsumptionResponse(
+    response: ExpeditionDailyResponse,
+    ordinaryRequired: boolean,
+  ) {
+    if (response.status !== "resolved") return;
+
+    const id = response.targetPlayerId;
+    const consumptionResolvedPlayerIds = ordinaryRequired
+      ? [...new Set([...$expedition.wilderness.consumptionResolvedPlayerIds, id])]
+      : $expedition.wilderness.consumptionResolvedPlayerIds;
+
+    const foodSatisfiedPlayerIds =
+      ordinaryRequired && response.foodSatisfied
+        ? [...new Set([...$expedition.wilderness.foodSatisfiedPlayerIds, id])]
+        : $expedition.wilderness.foodSatisfiedPlayerIds.filter(
+            (playerId) => !ordinaryRequired || playerId !== id || !!response.foodSatisfied,
+          );
+
+    const waterSatisfiedPlayerIds =
+      ordinaryRequired && response.waterSatisfied
+        ? [...new Set([...$expedition.wilderness.waterSatisfiedPlayerIds, id])]
+        : $expedition.wilderness.waterSatisfiedPlayerIds.filter(
+            (playerId) => !ordinaryRequired || playerId !== id || !!response.waterSatisfied,
+          );
+
+    const priorExtra = $expedition.wilderness.extraWaterRollsResolvedByPlayer[id] ?? 0;
+    await patchWilderness({
+      consumptionResolvedPlayerIds,
+      foodSatisfiedPlayerIds,
+      waterSatisfiedPlayerIds,
+      extraWaterRollsResolvedByPlayer: {
+        ...$expedition.wilderness.extraWaterRollsResolvedByPlayer,
+        [id]: priorExtra + (response.extraWaterRollsResolved ?? 0),
+      },
+    });
+  }
+
+  async function promptDailyConsumption() {
+    if (!$isGM) return;
+
+    for (const member of playerMembers) {
+      const ordinaryRequired =
+        !$expedition.wilderness.consumptionResolvedPlayerIds.includes(member.id);
+      const extraWaterRolls = unresolvedExtraWaterRolls(member.id);
+      if (!ordinaryRequired && extraWaterRolls <= 0) continue;
+      if (pendingConsumptionIds.has(member.id)) continue;
+
+      pendingConsumptionIds.add(member.id);
+      const threshold: 2 | 3 = quartermasterBenefitActiveSoFar ? 2 : 3;
+      void requestExpeditionDaily({
+        targetPlayerId: member.id,
+        kind: "Consumption",
+        day: $expedition.wilderness.day,
+        ordinaryThreshold: threshold,
+        ordinaryRequired,
+        extraWaterRolls,
+        note:
+          (ordinaryRequired
+            ? `Daily ration + Water Usage; ordinary depletion threshold 1–${threshold}.`
+            : "Ordinary daily consumption already resolved.") +
+          (extraWaterRolls
+            ? ` ${extraWaterRolls} additional Water Usage roll${extraWaterRolls === 1 ? "" : "s"} owed from Heat/Forced March; these deplete on 1–3.`
+            : ""),
+      })
+        .then(async (response) => {
+          if (response) await recordConsumptionResponse(response, ordinaryRequired);
+        })
+        .finally(() => pendingConsumptionIds.delete(member.id));
+    }
+  }
+
+  async function resolveNpcSleep(member: CompanyMember, quality: RestQuality) {
+    const npc = member.npc;
+    if (!npc) return;
+
+    const nextNpc: CompanyNpc = {
+      ...npc,
+      fatigue: quality === "Perilous" ? npc.fatigue : 0,
+      deprivedFromRest: false,
+    };
+
+    await patchWilderness({
+      companyNpcs: $expedition.wilderness.companyNpcs.map((entry) =>
+        entry.id === npc.id ? nextNpc : entry,
+      ),
+      sleptPlayerIdsToday: [
+        ...new Set([...$expedition.wilderness.sleptPlayerIdsToday, npc.id]),
+      ],
+    });
+  }
+
+  async function promptRestForSleepers() {
+    if (!$isGM || !sleeperEntries.length || !restQualityReady) return;
+    const quality = $expedition.wilderness.campRestQuality as RestQuality;
+
+    for (const { member } of sleeperEntries) {
+      if ($expedition.wilderness.sleptPlayerIdsToday.includes(member.id)) continue;
+
+      if (member.source === "npc") {
+        await resolveNpcSleep(member, quality);
+        continue;
+      }
+
+      if (pendingRestIds.has(member.id)) continue;
+      pendingRestIds.add(member.id);
+
+      void requestExpeditionDaily({
+        targetPlayerId: member.id,
+        kind: "Rest",
+        day: $expedition.wilderness.day,
+        quality,
+        note:
+          `${quality} Rest from the established shelter. Rest is separate from food/water and Catch Your Breath.`,
+      })
+        .then(async (response) => {
+          if (!response || response.status !== "resolved") return;
+          await patchWilderness({
+            sleptPlayerIdsToday: [
+              ...new Set([
+                ...$expedition.wilderness.sleptPlayerIdsToday,
+                response.targetPlayerId,
+              ]),
+            ],
+          });
+        })
+        .finally(() => pendingRestIds.delete(member.id));
+    }
+  }
+
+  async function setManualRestQuality() {
+    if (!$isGM) return;
+    clearQuarterPlan();
+    await patchWilderness({
+      campRestQuality: manualRestQuality,
+      campRestQualityDay: $expedition.wilderness.day,
+    });
+  }
+
+  function recordForcedMarchAttempt(playerId: string) {
+    const key = `${$expedition.wilderness.day}:${$expedition.wilderness.quarter}:${playerId}`;
+    if ($expedition.wilderness.forcedMarchAttemptKeys.includes(key)) return;
+
+    patchWilderness({
+      forcedMarchAttemptKeys: [
+        ...$expedition.wilderness.forcedMarchAttemptKeys,
+        key,
+      ],
+      forcedMarchAttemptsByPlayer: {
+        ...$expedition.wilderness.forcedMarchAttemptsByPlayer,
+        [playerId]: ($expedition.wilderness.forcedMarchAttemptsByPlayer[playerId] ?? 0) + 1,
+      },
     });
   }
 
@@ -945,7 +1213,17 @@
       return;
     }
 
-    const quartermasterAssignment = currentAssignments.find((assignment) => assignment.role === "Quartermaster");
+    if (sleeperEntries.length && !restQualityReady) {
+      quarterPlanActive = false;
+      quarterTasks = [];
+      quarterMessage =
+        "Sleep resolves Rest, but no Rest quality is established for today. Complete Make Camp first, or set the shelter's Rest quality below.";
+      return;
+    }
+
+    const quartermasterAssignment = currentAssignments.find(
+      (assignment) => assignment.role === "Quartermaster" && assignment.activity === "Travel",
+    );
     if (quartermasterAssignment) {
       const qm = memberForId(quartermasterAssignment.playerId);
       if (!qm || !roleEligible(qm, "Quartermaster")) {
@@ -1010,7 +1288,9 @@
       }
 
       if ($expedition.wilderness.routeMode === "Unmapped Country") {
-        const trailAssignment = currentAssignments.find((a) => a.role === "Trailblazer");
+        const trailAssignment = currentAssignments.find(
+          (a) => a.role === "Trailblazer" && a.activity === "Travel",
+        );
         const trailMember = trailAssignment ? memberForId(trailAssignment.playerId) : undefined;
         if (!trailAssignment || !trailMember) {
           quarterPlanActive = false;
@@ -1149,6 +1429,17 @@
 
       void resolveTask(task);
     }
+
+    // The ordinary daily ration/Water checkpoint is normally the Evening
+    // Make Camp Quarter. If the Company skips camp to Force March, closeout
+    // below will still require these obligations before the next day begins.
+    if (quarterRequiresConsumption) {
+      void promptDailyConsumption();
+    }
+
+    if (sleeperEntries.length) {
+      void promptRestForSleepers();
+    }
   }
 
   function setTaskState(task: QuarterTask, watch = false) {
@@ -1272,12 +1563,16 @@
       watchMessage = response.outcome ?? "";
     }
 
-    if (response.kind === "Forced March" && response.roll?.success === false) {
-      await patchWilderness({
-        forcedMarchStoppedPlayerIds: [
-          ...new Set([...$expedition.wilderness.forcedMarchStoppedPlayerIds, response.targetPlayerId]),
-        ],
-      });
+    if (response.kind === "Forced March") {
+      recordForcedMarchAttempt(response.targetPlayerId);
+
+      if (response.roll?.success === false) {
+        await patchWilderness({
+          forcedMarchStoppedPlayerIds: [
+            ...new Set([...$expedition.wilderness.forcedMarchStoppedPlayerIds, response.targetPlayerId]),
+          ],
+        });
+      }
     }
   }
 
@@ -1339,7 +1634,9 @@
     let quartermasterMissedToday = $expedition.wilderness.quartermasterMissedToday;
 
     if (travelingThisQuarter) {
-      const assignment = currentAssignments.find((entry) => entry.role === "Quartermaster");
+      const assignment = currentAssignments.find(
+        (entry) => entry.role === "Quartermaster" && entry.activity === "Travel",
+      );
       const member = assignment ? memberForId(assignment.playerId) : undefined;
       if (assignment && member && roleEligible(member, "Quartermaster")) {
         if (!quartermasterTodayId) quartermasterTodayId = assignment.playerId;
@@ -1350,12 +1647,51 @@
       }
     }
 
+    let campRestQuality = $expedition.wilderness.campRestQuality;
+    let campRestQualityDay = $expedition.wilderness.campRestQualityDay;
+    const makeCampTask = quarterTasks.find((task) => task.kind === "Make Camp");
+    if (makeCampTask?.response?.roll) {
+      campRestQuality = makeCampTask.response.roll.success ? "Normal" : "Perilous";
+      campRestQualityDay = $expedition.wilderness.day;
+    }
+
     const weatherDelay = travelingThisQuarter ? weatherTravelDelay() : 0;
     const clockCost = 1 + weatherDelay;
     const next = advanceClock($expedition.wilderness.quarter, clockCost);
     const completedLabel = `Day ${$expedition.wilderness.day} ${$expedition.wilderness.quarter}`;
     const travelCount = $expedition.wilderness.travelQuartersToday + (travelingThisQuarter ? 1 : 0);
     const nextDay = $expedition.wilderness.day + next.daysAdvanced;
+
+    // Consumption may be delayed by Forced March, but it is never waived.
+    // Do not cross dawn until ordinary daily consumption and every Heat /
+    // Forced March extra Water obligation have been resolved for connected PCs.
+    if (next.daysAdvanced && (!dailyConsumptionReady || !extraWaterReady)) {
+      await promptDailyConsumption();
+      quarterMessage =
+        "Daily closeout is still owed. Food/Water prompts were sent; complete them before beginning the next day.";
+      return;
+    }
+
+    let companyNpcs = $expedition.wilderness.companyNpcs;
+    if (next.daysAdvanced) {
+      for (const member of playerMembers) {
+        applyDayCloseout(
+          member.id,
+          $expedition.wilderness.day,
+          $expedition.wilderness.foodSatisfiedPlayerIds.includes(member.id),
+          $expedition.wilderness.sleptPlayerIdsToday.includes(member.id),
+        );
+      }
+
+      companyNpcs = companyNpcs.map((npc) => {
+        if ($expedition.wilderness.sleptPlayerIdsToday.includes(npc.id)) return npc;
+        return {
+          ...npc,
+          fatigue: (npc.fatigue ?? 0) + 1,
+          deprivedFromRest: true,
+        };
+      });
+    }
 
     await patchWilderness({
       progress,
@@ -1368,6 +1704,16 @@
       quartermasterTodayId: next.daysAdvanced ? "" : quartermasterTodayId,
       quartermasterCoveredTravelQuarters: next.daysAdvanced ? 0 : quartermasterCoveredTravelQuarters,
       quartermasterMissedToday: next.daysAdvanced ? false : quartermasterMissedToday,
+      campRestQuality: next.daysAdvanced ? "" : campRestQuality,
+      campRestQualityDay: next.daysAdvanced ? 0 : campRestQualityDay,
+      consumptionResolvedPlayerIds: next.daysAdvanced ? [] : $expedition.wilderness.consumptionResolvedPlayerIds,
+      foodSatisfiedPlayerIds: next.daysAdvanced ? [] : $expedition.wilderness.foodSatisfiedPlayerIds,
+      waterSatisfiedPlayerIds: next.daysAdvanced ? [] : $expedition.wilderness.waterSatisfiedPlayerIds,
+      extraWaterRollsResolvedByPlayer: next.daysAdvanced ? {} : $expedition.wilderness.extraWaterRollsResolvedByPlayer,
+      forcedMarchAttemptsByPlayer: next.daysAdvanced ? {} : $expedition.wilderness.forcedMarchAttemptsByPlayer,
+      forcedMarchAttemptKeys: next.daysAdvanced ? [] : $expedition.wilderness.forcedMarchAttemptKeys,
+      sleptPlayerIdsToday: next.daysAdvanced ? [] : $expedition.wilderness.sleptPlayerIdsToday,
+      companyNpcs,
     });
 
     quarterTasks = [];
@@ -1377,8 +1723,38 @@
     quarterMessage =
       `${completedLabel} resolved. ` +
       `${progressMade ? "Travel progress +1. " : travelingThisQuarter ? "No travel progress. " : "Company did not travel. "}` +
+      `${makeCampTask?.response?.roll ? `Camp established for ${campRestQuality} Rest. ` : ""}` +
       `${weatherDelay ? `Weather consumed +${weatherDelay} additional Quarter${weatherDelay === 1 ? "" : "s"}. ` : ""}` +
-      `${next.daysAdvanced ? `Day ${nextDay} begins; confirm Terrain and Route, then roll new Weather and declare Pace.` : ""}`;
+      `${next.daysAdvanced ? `Day ${nextDay} begins; missing Sleep applied +1 Fatigue and Rest deprivation, then Terrain/Route confirmation begins.` : ""}`;
+  }
+
+  async function playerResolveConsumption() {
+    const request = $PendingExpeditionDailyStore;
+    if (dailyBusy || !request || request.kind !== "Consumption") return;
+    dailyBusy = true;
+    try {
+      await resolvePendingConsumption({
+        rationSource: rationChoice || "none",
+        waterSource: waterChoice || "none",
+      });
+    } finally {
+      dailyBusy = false;
+    }
+  }
+
+  async function playerResolveRest() {
+    const request = $PendingExpeditionDailyStore;
+    if (dailyBusy || !request || request.kind !== "Rest") return;
+    dailyBusy = true;
+    try {
+      await resolvePendingRest(
+        request.quality === "Comfortable" && localLostAttributes.length
+          ? restAttributeChoice
+          : undefined,
+      );
+    } finally {
+      dailyBusy = false;
+    }
   }
 
   async function playerResolve(choice?: "INT" | "STR") {
@@ -1631,6 +2007,29 @@
                   </div>
                 {/each}
               </div>
+              {#if quarterRequiresConsumption}
+                <div class="mt-2 border rounded px-2 py-1 bg-white text-[10px] flex items-center gap-2">
+                  <span class="font-bold">Daily Food & Water</span>
+                  <span class="ml-auto">
+                    {$expedition.wilderness.consumptionResolvedPlayerIds.length}/{playerMembers.length} players
+                  </span>
+                  {#if $isGM && (!dailyConsumptionReady || !extraWaterReady)}
+                    <button class="border rounded px-2 py-0.5" on:click={promptDailyConsumption}>Prompt Again</button>
+                  {/if}
+                </div>
+              {/if}
+              {#if sleeperEntries.length}
+                <div class="mt-1 border rounded px-2 py-1 bg-white text-[10px] flex items-center gap-2">
+                  <span class="font-bold">Sleep / Rest</span>
+                  <span>{$expedition.wilderness.campRestQuality || "No quality set"}</span>
+                  <span class="ml-auto">
+                    {$expedition.wilderness.sleptPlayerIdsToday.filter((id) => sleeperEntries.some(({ member }) => member.id === id)).length}/{sleeperEntries.length}
+                  </span>
+                  {#if $isGM && restQualityReady && !sleepersResolved}
+                    <button class="border rounded px-2 py-0.5" on:click={promptRestForSleepers}>Prompt Again</button>
+                  {/if}
+                </div>
+              {/if}
               {#if quarterMessage}<div class="mt-1 text-[10px]">{quarterMessage}</div>{/if}
             </div>
           {:else}
@@ -1849,6 +2248,37 @@
                   <div class="text-gray-500">No daily coverage established yet.</div>
                 {/if}
               </div>
+              <div class="border rounded-md p-2 bg-white text-[10px] md:col-span-2">
+                <div class="flex items-center gap-2">
+                  <span class="font-bold">Daily Closeout</span>
+                  <span>
+                    Food/Water {$expedition.wilderness.consumptionResolvedPlayerIds.length}/{playerMembers.length}
+                  </span>
+                  <span>·</span>
+                  <span>Rest {$expedition.wilderness.sleptPlayerIdsToday.length}/{company.length}</span>
+                  {#if restQualityReady}
+                    <span class="role-chip">{$expedition.wilderness.campRestQuality} Rest</span>
+                  {/if}
+                </div>
+                {#if sleeperEntries.length && !restQualityReady}
+                  <div class="flex flex-wrap items-end gap-1 mt-1">
+                    <span class="text-gray-500 flex-1 min-w-[180px]">
+                      Sleep is declared but no camp/shelter quality is established. Use this only for existing shelter or open-ground Rest; Make Camp sets this automatically.
+                    </span>
+                    {#if $isGM}
+                      <select bind:value={manualRestQuality} class="w-auto">
+                        <option>Perilous</option>
+                        <option>Normal</option>
+                        <option>Comfortable</option>
+                      </select>
+                      <button class="border rounded px-2 py-1" on:click={setManualRestQuality}>Set Shelter Rest</button>
+                    {/if}
+                  </div>
+                {/if}
+                <div class="text-gray-500 mt-1">
+                  No Sleep Quarter by dawn: +1 Fatigue and Deprived from lack of Rest. Food and Water are tracked separately.
+                </div>
+              </div>
             </div>
           </details>
         </div>
@@ -1946,6 +2376,125 @@
       </div>
 
       <div class="exp-cell min-h-0 overflow-y-auto">
+        {#if !$isGM && $PendingExpeditionDailyStore}
+          <div class="border-2 border-black rounded-md p-2 mb-2 bg-gray-50">
+            {#if $PendingExpeditionDailyStore.kind === "Consumption"}
+              <div class="font-bold text-xs">DAILY FOOD & WATER</div>
+              <div class="text-[10px] text-gray-500 mt-0.5">
+                Day {$PendingExpeditionDailyStore.day}
+                {#if $PendingExpeditionDailyStore.ordinaryRequired}
+                  · ordinary Ration + Water Usage
+                {:else}
+                  · additional Water only
+                {/if}
+              </div>
+              {#if $PendingExpeditionDailyStore.note}
+                <div class="text-[10px] mt-1">{$PendingExpeditionDailyStore.note}</div>
+              {/if}
+
+              {#if $PendingExpeditionDailyStore.ordinaryRequired}
+                <label class="block mt-2 text-xs">
+                  Ration source
+                  <select bind:value={rationChoice}>
+                    {#each localRationItems as item (item.id)}
+                      <option value={item.id}>{item.name} · {item.usageDie}</option>
+                    {/each}
+                    <option value="shared">Company/shared supply — tracked manually</option>
+                    <option value="none">No ration available</option>
+                  </select>
+                </label>
+              {/if}
+
+              {#if $PendingExpeditionDailyStore.ordinaryRequired || $PendingExpeditionDailyStore.extraWaterRolls > 0}
+                <label class="block mt-1 text-xs">
+                  Water source
+                  <select bind:value={waterChoice}>
+                    {#each localWaterItems as item (item.id)}
+                      <option value={item.id}>{item.name} · {item.usageDie}</option>
+                    {/each}
+                    <option value="shared">Company/shared supply — tracked manually</option>
+                    <option value="none">No accessible Water</option>
+                  </select>
+                </label>
+              {/if}
+
+              <div class="text-[9px] text-gray-500 mt-1">
+                A die that depletes still supplied that use. Missing Water causes Deprived immediately; missing food is checked at dawn.
+              </div>
+              <button
+                class="bg-black text-white rounded-md px-3 py-1 text-xs mt-2"
+                disabled={dailyBusy}
+                on:click={playerResolveConsumption}
+              >
+                {dailyBusy ? "Resolving…" : "Roll Daily Usage"}
+              </button>
+            {:else}
+              <div class="font-bold text-xs">SLEEP / REST</div>
+              <div class="text-xs mt-1">
+                {$PendingExpeditionDailyStore.quality} Rest · Day {$PendingExpeditionDailyStore.day}
+              </div>
+              {#if $PendingExpeditionDailyStore.note}
+                <div class="text-[10px] text-gray-500 mt-1">{$PendingExpeditionDailyStore.note}</div>
+              {/if}
+              {#if $PendingExpeditionDailyStore.quality === "Comfortable" && localLostAttributes.length}
+                <label class="block mt-2 text-xs">
+                  Restore Attribute
+                  <select bind:value={restAttributeChoice}>
+                    {#each localLostAttributes as attribute}
+                      <option value={attribute}>{attribute}</option>
+                    {/each}
+                  </select>
+                </label>
+              {/if}
+              <div class="text-[9px] text-gray-500 mt-1">
+                Perilous prevents Rest deprivation. Normal also removes all Fatigue. Comfortable also restores 1 lost Attribute point. Light Injuries can heal with appropriate Medical supplies and a full night’s Rest.
+              </div>
+              <button
+                class="bg-black text-white rounded-md px-3 py-1 text-xs mt-2"
+                disabled={dailyBusy}
+                on:click={playerResolveRest}
+              >
+                {dailyBusy ? "Resting…" : "Resolve " + $PendingExpeditionDailyStore.quality + " Rest"}
+              </button>
+            {/if}
+          </div>
+        {/if}
+
+        {#if !$isGM && !$PendingExpeditionDailyStore && $LastExpeditionDailyStore}
+          <div class="border rounded-md p-2 mb-2 bg-gray-50">
+            <div class="font-bold text-xs">LAST DAILY RESOLUTION</div>
+            {#if $LastExpeditionDailyStore.kind === "Consumption"}
+              <div class="text-[10px] mt-1">
+                Food: {$LastExpeditionDailyStore.foodSatisfied ? "satisfied" : "not satisfied"}
+                · Water: {$LastExpeditionDailyStore.waterSatisfied ? "satisfied" : "not satisfied"}
+              </div>
+              {#if $LastExpeditionDailyStore.usage?.length}
+                <div class="flex flex-col gap-0.5 mt-1">
+                  {#each $LastExpeditionDailyStore.usage as use}
+                    <div class="text-[9px]">
+                      {use.category} · {use.itemName}: {use.before} rolled {use.roll}
+                      {use.after === use.before ? " — holds" : " — " + use.after}
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+            {:else if $LastExpeditionDailyStore.rest}
+              <div class="text-[10px] mt-1">
+                {$LastExpeditionDailyStore.rest.quality} Rest resolved.
+                {#if $LastExpeditionDailyStore.rest.fatigueRemoved}
+                  {$LastExpeditionDailyStore.rest.fatigueRemoved} Fatigue removed.
+                {/if}
+                {#if $LastExpeditionDailyStore.rest.healedLightInjuries}
+                  {$LastExpeditionDailyStore.rest.healedLightInjuries} Light Injury(ies) healed.
+                {/if}
+                {#if $LastExpeditionDailyStore.rest.restoredAttribute}
+                  {$LastExpeditionDailyStore.rest.restoredAttribute} +1.
+                {/if}
+              </div>
+            {/if}
+          </div>
+        {/if}
+
         {#if !$isGM && !$PendingExpeditionRollStore && $LastExpeditionRollStore}
           <div
             class="border-2 rounded-md p-2 mb-2"
@@ -2085,6 +2634,11 @@
                     {/each}
                   </select>
                 </label>
+                {#if assignment.activity !== "Travel" && assignment.role}
+                  <div class="text-[9px] text-gray-500 mt-0.5">
+                    {assignment.role} is stored and becomes active again when this member returns to Travel.
+                  </div>
+                {/if}
 
                 {#if assignment.activity === "Stand Watch"}
                   <div class="mt-1 text-[9px] text-gray-500">

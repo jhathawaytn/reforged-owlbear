@@ -535,6 +535,7 @@ export type ReforgedCharacter = {
   // Fatigue & Injury zone (§9.1.2, §14.4, §14.9) - always counts against
   // STR capacity, never part of the Backpack, never dropped with it.
   fatigue: number; // 1 slot each; cleared only by Normal/Comfortable Rest
+  deprivationCauses: string[]; // tracked causes sustaining Deprived (Food, Water, Rest, Manual, etc.)
   injuries: Injury[]; // 1 slot each
   backpackDropped: boolean; // Backpack-zone items stop counting while dropped
 

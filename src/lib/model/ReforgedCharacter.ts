@@ -64,6 +64,7 @@ export function defaultPC(): ReforgedCharacter {
     gear: [],
     conditions: [],
     fatigue: 0,
+    deprivationCauses: [],
     injuries: [],
     backpackDropped: false,
 
@@ -80,6 +81,25 @@ export const PlayerCharacterStore = createUndoRedoStore(
   writable<ReforgedCharacter>(defaultPC()),
 );
 export const pc = PlayerCharacterStore;
+
+export function addDeprivationCause(pc: ReforgedCharacter, cause: string): ReforgedCharacter {
+  const causes = pc.deprivationCauses.includes(cause)
+    ? pc.deprivationCauses
+    : [...pc.deprivationCauses, cause];
+  const conditions = pc.conditions.includes("Deprived")
+    ? pc.conditions
+    : [...pc.conditions, "Deprived"];
+  return { ...pc, deprivationCauses: causes, conditions };
+}
+
+export function clearDeprivationCause(pc: ReforgedCharacter, cause: string): ReforgedCharacter {
+  const causes = pc.deprivationCauses.filter((entry) => entry !== cause);
+  const conditions =
+    causes.length === 0
+      ? pc.conditions.filter((condition) => condition !== "Deprived")
+      : pc.conditions;
+  return { ...pc, deprivationCauses: causes, conditions };
+}
 
 // Total Inventory capacity equals current STR (Ch.9, §9.1.1).
 export function inventoryCapacity(pc: ReforgedCharacter): number {
@@ -263,6 +283,9 @@ export function withDefaults(c: Partial<ReforgedCharacter> | undefined): Reforge
   // its current Attributes (i.e. assume no Permanent Injury/Growth gap yet).
   if (!c?.attributeMax) {
     merged.attributeMax = { ...merged.attributes };
+  }
+  if (!c?.deprivationCauses && merged.conditions.includes("Deprived")) {
+    merged.deprivationCauses = ["Manual"];
   }
   return merged;
 }

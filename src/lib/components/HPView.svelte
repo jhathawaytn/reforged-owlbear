@@ -1,9 +1,15 @@
 <script lang="ts">
-  import { PlayerCharacterStore as pc, isOverburdened } from "../model/ReforgedCharacter";
+  import {
+    PlayerCharacterStore as pc,
+    isOverburdened,
+    addDeprivationCause,
+    clearDeprivationCause,
+  } from "../model/ReforgedCharacter";
   import { notify } from "../services/Notifier";
-  import { ATTRIBUTES, DIE_SIDES, stepDownDie } from "../types";
+  import { DIE_SIDES, stepDownDie } from "../types";
   import type { Attribute, UsageDieState } from "../types";
   import { rollSingleDie } from "../services/DicePlus";
+  import { lostAttributes, resolveRestForCurrentCharacter } from "../services/RestRecovery";
   import TakeDamageButton from "./TakeDamageButton.svelte";
 
   // Overburdened (Appendix A): "your HP is immediately reduced to 0... while
@@ -30,12 +36,13 @@
   // a drink of water - one Water Usage roll from an accessible Water stock.
   // A stock that depletes on this roll still supplied the drink. No
   // accessible Water stock -> Deprived, cannot Catch Your Breath. This is
-  // also the only way Strain clears (besides Rest/Sleep, below), so a
-  // successful Catch Your Breath clears it too.
+  // Catch Your Breath clears Strain as part of the existing recovery helper;
+  // Rest itself is a separate procedure and does not imply this water-gated action.
   async function catchYourBreath(label = "Catch Your Breath") {
     const waterItem = $pc.gear.find((g) => g.usageKind === "Water" && g.usageDie && g.usageDie !== "depleted");
 
     if (!waterItem) {
+      $pc = addDeprivationCause($pc, "Water");
       notify(`${label}: no accessible Water stock - you're Deprived and cannot ${label}.`);
       return; // HP is NOT restored, Strain is NOT cleared
     }
@@ -55,6 +62,7 @@
       waterNote = `${waterItem.name} holds`;
     }
 
+    $pc = clearDeprivationCause($pc, "Water");
     const beforeHp = $pc.hitPoints;
     $pc.hitPoints = $pc.maxHitPoints;
     const strainCleared = $pc.strain > 0;
@@ -65,57 +73,27 @@
     );
   }
 
-  // Rest quality (§14.9): Perilous only prevents Deprived-from-lack-of-Rest;
-  // Normal also removes all Fatigue; Comfortable also restores 1 lost
-  // Attribute point (up to that Attribute's unreduced maximum). HP
-  // restoration/Strain clearing reuse Catch Your Breath's water-gated
-  // mechanic (§14.1) - a full Rest obviously includes catching your breath.
+  // Rest quality (§14.9) is resolved independently from Catch Your Breath.
+  // Rest does not automatically restore HP or consume Water; those belong to
+  // Catch Your Breath. Normal/Comfortable remove Fatigue, Comfortable may
+  // restore one lost Attribute, and a full night's Rest can heal Light
+  // Injuries when Medical supplies are available.
   let restQuality: "Perilous" | "Normal" | "Comfortable" = "Normal";
-  $: lostAttributes = ATTRIBUTES.filter((a) => $pc.attributes[a] < $pc.attributeMax[a]);
+  $: restLostAttributes = lostAttributes($pc);
   let restoreAttr: Attribute = "STR";
-  $: if (restQuality === "Comfortable" && lostAttributes.length && !lostAttributes.includes(restoreAttr)) {
-    restoreAttr = lostAttributes[0];
-  }
-
-  // Light Injury healing (§14.4): needs "appropriate herbs or supplies and a
-  // full night's rest" - modeled as an accessible Medical Usage Die stock,
-  // gated the same way Water gates Catch Your Breath. Perilous Rest isn't a
-  // full night's rest, so it doesn't heal Light Injuries either.
-  async function healLightInjuries() {
-    const medItem = $pc.gear.find((g) => g.usageKind === "Medical" && g.usageDie && g.usageDie !== "depleted");
-    const lightInjuries = $pc.injuries.filter((i) => i.severity === "Light");
-    if (!lightInjuries.length) return;
-    if (!medItem) {
-      notify(`Rest: ${lightInjuries.length} Light Injury(ies) can't heal - no accessible Medical supplies.`);
-      return;
-    }
-    const size = medItem.usageDie as Exclude<UsageDieState, "depleted">;
-    const roll = await rollSingleDie(DIE_SIDES[size]);
-    if (roll <= 3) {
-      const stepped = stepDownDie(size);
-      medItem.usageDie = stepped;
-      $pc.gear = $pc.gear;
-    }
-    $pc.injuries = $pc.injuries.filter((i) => i.severity !== "Light");
-    notify(`Rest: ${medItem.name} treats ${lightInjuries.length} Light Injury(ies) - healed.`);
+  $: if (
+    restQuality === "Comfortable" &&
+    restLostAttributes.length &&
+    !restLostAttributes.includes(restoreAttr)
+  ) {
+    restoreAttr = restLostAttributes[0];
   }
 
   async function restOrSleep() {
-    const hadWater = $pc.gear.some((g) => g.usageKind === "Water" && g.usageDie && g.usageDie !== "depleted");
-    await catchYourBreath(`${restQuality} Rest`);
-    if (hadWater && restQuality !== "Perilous") {
-      if ($pc.fatigue > 0) {
-        const cleared = $pc.fatigue;
-        $pc.fatigue = 0;
-        notify(`${restQuality} Rest: ${cleared} Fatigue removed.`);
-      }
-      await healLightInjuries();
-      if (restQuality === "Comfortable" && lostAttributes.includes(restoreAttr)) {
-        const before = $pc.attributes[restoreAttr];
-        $pc.attributes = { ...$pc.attributes, [restoreAttr]: before + 1 };
-        notify(`Comfortable Rest: ${restoreAttr} restored ${before} -> ${before + 1}.`);
-      }
-    }
+    await resolveRestForCurrentCharacter(
+      restQuality,
+      restQuality === "Comfortable" ? restoreAttr : undefined,
+    );
   }
 </script>
 
@@ -150,17 +128,17 @@
     Catch Your Breath
   </button>
   <div class="flex gap-1">
-    <select bind:value={restQuality} class="text-xs flex-1 min-w-0" title="§14.9 - Normal or Comfortable also removes Fatigue and heals Light Injuries (needs Medical supplies); Comfortable also restores 1 lost Attribute point">
+    <select bind:value={restQuality} class="text-xs flex-1 min-w-0" title="§14.9 - Perilous prevents Rest deprivation; Normal/Comfortable remove Fatigue; a full night's Rest can heal Light Injuries with Medical supplies; Comfortable also restores 1 lost Attribute point">
       <option>Perilous</option>
       <option>Normal</option>
       <option>Comfortable</option>
     </select>
-    {#if restQuality === "Comfortable" && lostAttributes.length}
+    {#if restQuality === "Comfortable" && restLostAttributes.length}
       <select bind:value={restoreAttr} class="text-xs w-16" title="Which Attribute to restore 1 point to (§14.9)">
-        {#each lostAttributes as a}<option value={a}>{a}</option>{/each}
+        {#each restLostAttributes as a}<option value={a}>{a}</option>{/each}
       </select>
     {/if}
-    <button class="bg-black text-white rounded-md text-sm px-2" on:click={restOrSleep} title="Restores HP and clears Strain (needs Water); Normal/Comfortable also clears Fatigue and heals Light Injuries; Comfortable also restores 1 lost Attribute point">
+    <button class="bg-black text-white rounded-md text-sm px-2" on:click={restOrSleep} title="Resolve Rest quality. Rest is separate from Catch Your Breath: it does not automatically restore HP or consume Water.">
       Rest
     </button>
   </div>

@@ -13,6 +13,7 @@ export type TravelClimate =
   | "Tropical"
   | "Desert / Arid";
 export type TravelWeatherEffect = "normal" | "heavy" | "severe" | "cold-snap" | "heat-wave";
+export type RestQuality = "Perilous" | "Normal" | "Comfortable";
 
 export type WildernessActivity =
   | "Travel"
@@ -46,6 +47,7 @@ export type CompanyNpc = {
   quartermasterQualified: boolean;
   fatigue: number;
   notes: string;
+  deprivedFromRest: boolean;
 };
 
 export type ExpeditionAssignment = {
@@ -80,6 +82,15 @@ export type WildernessExpeditionState = {
   quartermasterTodayId: string;
   quartermasterCoveredTravelQuarters: number;
   quartermasterMissedToday: boolean;
+  campRestQuality: "" | RestQuality;
+  campRestQualityDay: number;
+  consumptionResolvedPlayerIds: string[];
+  foodSatisfiedPlayerIds: string[];
+  waterSatisfiedPlayerIds: string[];
+  extraWaterRollsResolvedByPlayer: Record<string, number>;
+  forcedMarchAttemptsByPlayer: Record<string, number>;
+  forcedMarchAttemptKeys: string[];
+  sleptPlayerIdsToday: string[];
   currentLocation: string;
   destination: string;
   progress: number;
@@ -130,6 +141,15 @@ export const defaultExpeditionState = (): ExpeditionState => ({
     quartermasterTodayId: "",
     quartermasterCoveredTravelQuarters: 0,
     quartermasterMissedToday: false,
+    campRestQuality: "",
+    campRestQualityDay: 0,
+    consumptionResolvedPlayerIds: [],
+    foodSatisfiedPlayerIds: [],
+    waterSatisfiedPlayerIds: [],
+    extraWaterRollsResolvedByPlayer: {},
+    forcedMarchAttemptsByPlayer: {},
+    forcedMarchAttemptKeys: [],
+    sleptPlayerIdsToday: [],
     currentLocation: "",
     destination: "",
     progress: 0,
@@ -162,6 +182,10 @@ function withDefaults(value: Partial<ExpeditionState> | undefined): ExpeditionSt
       ...legacyWilderness,
       routeTimeQuarters:
         legacyWilderness.routeTimeQuarters ?? legacyWilderness.targetQuarters ?? base.wilderness.routeTimeQuarters,
+      companyNpcs: (legacyWilderness.companyNpcs ?? base.wilderness.companyNpcs).map((npc) => ({
+        ...npc,
+        deprivedFromRest: npc.deprivedFromRest ?? false,
+      })),
     },
     exploration: { ...base.exploration, ...(value.exploration ?? {}) },
   };
