@@ -78,11 +78,44 @@
     showModal = true;
   }
 
-  $: shieldOptions = $pc.gear.filter((g) => hasArmorProperty(g, "Shield Sacrifice"));
-  $: deflectOptions = $pc.gear.filter(
-    (g) => g.durableCategory === "Armor" && g.equipped && g.condition !== "Broken" && g.condition !== "Destroyed",
+  function isFunctional(item: GearItem): boolean {
+    return item.condition !== "Broken" && item.condition !== "Destroyed";
+  }
+
+  $: shieldOptions = $pc.gear.filter(
+    (g) => hasArmorProperty(g, "Shield Sacrifice") && g.equipped && isFunctional(g),
   );
-  $: helmOptions = $pc.gear.filter((g) => hasArmorProperty(g, "Helm Sacrifice"));
+  $: blockShieldOptions = $pc.gear.filter(
+    (g) =>
+      (g.name === "Shield" || g.name === "Buckler") &&
+      g.equipped &&
+      isFunctional(g),
+  );
+  $: usableWeaponGear = $pc.gear.filter(
+    (g) => g.durableCategory === "Weapon" && g.equipped && isFunctional(g),
+  );
+  $: deflectOptions = $pc.gear.filter(
+    (g) => g.durableCategory === "Armor" && g.equipped && isFunctional(g),
+  );
+  $: helmOptions = $pc.gear.filter(
+    (g) => hasArmorProperty(g, "Helm Sacrifice") && g.equipped && isFunctional(g),
+  );
+
+  function reactionUnavailableReason(r: Reaction): string {
+    // Only block a Reaction when the sheet can prove it is unavailable.
+    // Fictional constraints (room to Dodge, Surprise, terrain, etc.) remain
+    // the GM/player's call under §13.7.8.
+    if (r === "ShieldSacrifice" && shieldOptions.length === 0) {
+      return "Requires a functional full Shield.";
+    }
+    if (r === "Block" && blockShieldOptions.length === 0 && usableWeaponGear.length === 0) {
+      return "Requires a functional Shield/Buckler or suitable weapon.";
+    }
+    if (r === "Parry" && usableWeaponGear.length === 0 && $pc.attacks.length === 0) {
+      return "Requires a weapon.";
+    }
+    return "";
+  }
 
   // Sacrifice always means Destroyed - it bypasses Condition steps, Quality
   // protection, and Masterwork Reserve entirely (§9.3.1), unlike an ordinary
@@ -101,6 +134,11 @@
   // Sacrifice which is decided after (§9.5.5) - one Reaction per incoming
   // Action. ----
   function selectReaction(r: Reaction) {
+    const unavailable = reactionUnavailableReason(r);
+    if (unavailable) {
+      notify(`${r} unavailable: ${unavailable}`);
+      return;
+    }
     reaction = r;
     const cfg = REACTIONS.find((x) => x.id === r)!;
     const isEligibleForManeuvering = r === "Block" || r === "Dodge" || r === "Parry" || r === "FightBack";
@@ -444,12 +482,16 @@
         </label>
       {/if}
       {#each REACTIONS as r (r.id)}
+        {@const unavailable = reactionUnavailableReason(r.id)}
         <button
           class="border rounded-md px-2 py-1 text-xs text-left"
-          title={r.strain ? `${r.strain} Strain` : "No Strain"}
+          class:bg-gray-100={!!unavailable}
+          class:text-gray-400={!!unavailable}
+          disabled={!!unavailable}
+          title={unavailable || (r.strain ? `${r.strain} Strain` : "No Strain")}
           on:click={() => selectReaction(r.id)}
         >
-          {r.label}{r.strain ? ` (${r.strain} Strain)` : ""}
+          {r.label}{r.strain ? ` (${r.strain} Strain)` : ""}{unavailable ? " — unavailable" : ""}
         </button>
       {/each}
     {/if}
