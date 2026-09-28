@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   defaultPC,
+  addDeprivationCause,
+  clearDeprivationCause,
   filledSlots,
   inventoryCapacity,
   isOverburdened,
@@ -29,6 +31,30 @@ function withGear(gear: GearItem[], overrides: Partial<ReforgedCharacter> = {}):
 function gear(overrides: Partial<GearItem> = {}): GearItem {
   return { id: "g1", name: "Test Item", zone: "Hand", slots: 1, equipped: true, notes: "", ...overrides };
 }
+
+describe("Deprived causes", () => {
+  it("tracks separate unmet needs without duplicating causes", () => {
+    let pc = defaultPC();
+    pc = addDeprivationCause(pc, "Food");
+    pc = addDeprivationCause(pc, "Rest");
+    pc = addDeprivationCause(pc, "Food");
+    expect(pc.deprivationCauses).toEqual(["Food", "Rest"]);
+    expect(pc.conditions).toContain("Deprived");
+  });
+
+  it("clearing one cause preserves Deprived while another cause remains", () => {
+    let pc = defaultPC();
+    pc = addDeprivationCause(pc, "Food");
+    pc = addDeprivationCause(pc, "Rest");
+    pc = clearDeprivationCause(pc, "Food");
+    expect(pc.deprivationCauses).toEqual(["Rest"]);
+    expect(pc.conditions).toContain("Deprived");
+
+    pc = clearDeprivationCause(pc, "Rest");
+    expect(pc.deprivationCauses).toEqual([]);
+    expect(pc.conditions).not.toContain("Deprived");
+  });
+});
 
 describe("Inventory capacity & slots (§9.1.1)", () => {
   it("capacity equals current STR", () => {
