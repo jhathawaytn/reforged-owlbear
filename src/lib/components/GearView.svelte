@@ -84,8 +84,8 @@
   $: overburdened = isOverburdened($pc);
   $: startingKitLocked = $pc.startingKitApplied || $pc.characterCreationFinalized;
 
-  // Hand/Handy have zone-specific access limits. Worn and Backpack are
-  // location/access categories only; their burden is governed by total STR.
+  // Hand/Handy have fixed access limits; Worn is capped at floor(STR/2).
+  // Backpack has no independent zone cap and is still governed by total STR.
   $: zoneUsage = GEAR_ZONES.map((zone) => ({
     zone,
     used: slotsForZone($pc, zone),
