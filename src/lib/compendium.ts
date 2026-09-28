@@ -200,8 +200,13 @@ export const GEAR_CATEGORIES: GearCategory[] = [
   "Medical",
 ];
 
-function defaultZoneFor(category: GearCategory): GearZone {
-  switch (category) {
+function defaultZoneFor(item: CompendiumItem): GearZone {
+  // A Backpack functions while worn (§9.1.2). Shields and Bucklers function
+  // while held; they occupy a hand unless a specific rule changes that.
+  if (item.name === "Backpack") return "Worn";
+  if (item.name === "Shield" || item.name === "Buckler") return "Hand";
+
+  switch (item.category) {
     case "Weapon":
       return "Hand";
     case "Armor":
@@ -229,7 +234,7 @@ export function compendiumItemToGear(item: CompendiumItem, id: string = newId())
   return {
     id,
     name: item.name,
-    zone: defaultZoneFor(item.category),
+    zone: defaultZoneFor(item),
     slots: item.slots,
     equipped: isDurable,
     armorValue: item.category === "Armor" ? parseArmorValue(item.armor) : undefined,
