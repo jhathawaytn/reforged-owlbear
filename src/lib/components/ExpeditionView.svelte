@@ -418,9 +418,6 @@
   }
   $: explorationHour = Math.floor(($expedition.exploration.turn - 1) / 6) + 1;
   $: explorationTurnInHour = (($expedition.exploration.turn - 1) % 6) + 1;
-  $: lightChecksDueNextTurn = $expedition.exploration.activeLights.some(
-    (light) => light.active && ((light.burnTurns ?? 0) + 1) % 3 === 0,
-  );
   $: dungeonEventDue =
     $expedition.exploration.dungeonEventCheckedHour !== explorationHour;
   $: localActiveLights = $expedition.exploration.activeLights.filter(
@@ -3512,9 +3509,7 @@
                 Light follows its carrier. Walls, doors, corners, smoke, and actual position still determine what it illuminates.
               </div>
             </div>
-            <span class="status-chip">
-              {lightChecksDueNextTurn ? "FUEL CHECK THIS TURN" : "FUEL CHECKS EVERY 3 BURN TURNS"}
-            </span>
+            <span class="status-chip">PER-SOURCE BURN CLOCKS</span>
           </div>
 
           {#if $expedition.exploration.activeLights.some((light) => light.active)}
@@ -3527,16 +3522,26 @@
                     <span class="text-gray-500">{light.mode}</span>
                   {/if}
                   <span class="ml-auto">{light.reachFeet} ft</span>
+                  {@const burnTurns = light.burnTurns ?? 0}
+                  {@const turnsUntilCheck = 3 - (burnTurns % 3)}
+                  <span
+                    class:font-bold={turnsUntilCheck === 1}
+                    class:text-amber-700={turnsUntilCheck === 1}
+                  >
+                    {turnsUntilCheck === 1
+                      ? "FUEL CHECK THIS TURN"
+                      : `Fuel check in ${turnsUntilCheck} Turns`}
+                  </span>
                   {#if light.sourceName === "Torch Bundle"}
-                    <span class:font-bold={(light.burnTurns ?? 0) >= 4} class:text-amber-700={(light.burnTurns ?? 0) >= 4}>
-                      {(light.burnTurns ?? 0) >= 5
+                    <span class:font-bold={burnTurns >= 4} class:text-amber-700={burnTurns >= 4}>
+                      {burnTurns >= 5
                         ? "FINAL TURN"
-                        : (light.burnTurns ?? 0) >= 4
+                        : burnTurns >= 4
                           ? "BURNING LOW"
-                          : `Torch ${(light.burnTurns ?? 0) + 1}/6`}
+                          : `Torch Turn ${burnTurns + 1}/6`}
                     </span>
                   {:else}
-                    <span>{light.burnTurns ?? 0} burn Turns</span>
+                    <span>{burnTurns} burn Turns</span>
                   {/if}
                   <span class="font-bold">{light.fuelName} {light.fuelDie}</span>
                 </div>
