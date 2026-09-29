@@ -1395,6 +1395,7 @@
             .catch((error) => {
               console.error("Company supply resolution failed", error);
             });
+          return companySupplyQueue;
         })
         .finally(() => pendingConsumptionIds.delete(member.id));
     }
