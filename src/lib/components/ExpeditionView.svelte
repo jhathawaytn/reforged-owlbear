@@ -140,6 +140,7 @@
   let npcKind: CompanyNpcKind = "Guide Hireling";
   let npcLevel = 1;
   let npcNotes = "";
+  let eventConspicuous = false;
 
   $: {
     const merged = new Map<string, CompanyMember>();
@@ -313,6 +314,37 @@
   $: arrivalCanBeRecorded =
     $expedition.wilderness.destination.trim().length > 0 &&
     ($expedition.wilderness.routeMode === "Unmapped Country" || knownRouteComplete);
+  $: unmappedEventDue =
+    $expedition.wilderness.routeMode === "Unmapped Country" &&
+    $expedition.wilderness.wildernessEventCheckedDay !== $expedition.wilderness.day;
+  $: knownRouteBaseEventRange =
+    $expedition.wilderness.routeTimeQuarters <= 0
+      ? { min: 0, max: 0 }
+      : $expedition.wilderness.routeTimeQuarters <= 2
+        ? { min: 0, max: 1 }
+        : $expedition.wilderness.routeTimeQuarters <= 7
+          ? { min: 1, max: 2 }
+          : { min: 2, max: 3 };
+  $: knownRouteEventMin = Math.max(
+    0,
+    knownRouteBaseEventRange.min +
+      ($expedition.wilderness.knownRouteDangerous ? 1 : 0) -
+      ($expedition.wilderness.knownRouteCautiousCommitment ? 1 : 0),
+  );
+  $: knownRouteEventMax = Math.max(
+    0,
+    knownRouteBaseEventRange.max +
+      ($expedition.wilderness.knownRouteDangerous ? 1 : 0) -
+      ($expedition.wilderness.knownRouteCautiousCommitment ? 1 : 0),
+  );
+  $: knownRouteEventsRemaining =
+    $expedition.wilderness.knownRouteEventBudget < 0
+      ? 0
+      : Math.max(
+          0,
+          $expedition.wilderness.knownRouteEventBudget -
+            $expedition.wilderness.knownRouteEventsResolved,
+        );
   $: workflowStep = (
     !climateReady
       ? "climate"
@@ -598,6 +630,31 @@
     return { quarter: QUARTERS[idx + 1], newDay: false };
   }
 
+  function defaultActivityForQuarter(q: TravelQuarter): WildernessActivity | null {
+    if (q === "Morning" || q === "Day") return "Travel";
+    if (q === "Evening") return "Sleep";
+    return null;
+  }
+
+  function assignmentsForQuarter(q: TravelQuarter): ExpeditionAssignment[] {
+    const activity = defaultActivityForQuarter(q);
+    if (!activity) return $expedition.wilderness.assignments;
+
+    return company.map((member) => {
+      const current = assignmentFor(member.id);
+      return { ...current, playerId: member.id, activity };
+    });
+  }
+
+  function resetKnownRouteEventState() {
+    return {
+      knownRouteEventBudget: -1,
+      knownRouteEventsResolved: 0,
+      knownRouteDangerous: false,
+      knownRouteCautiousCommitment: false,
+    };
+  }
+
   function onRouteChange(e: Event) {
     clearQuarterPlan();
     patchWilderness({
@@ -607,6 +664,7 @@
       paceDeclaredDay: 0,
       weather: "Not rolled",
       weatherExtremeCandidate: "",
+      ...resetKnownRouteEventState(),
     });
   }
 
@@ -619,6 +677,75 @@
       paceDeclaredDay: 0,
       weather: "Not rolled",
       weatherExtremeCandidate: "",
+    });
+  }
+
+  function onDestinationChange(e: Event) {
+    clearQuarterPlan();
+    patchWilderness({
+      destination: (e.currentTarget as HTMLInputElement).value,
+      progress: 0,
+      ...resetKnownRouteEventState(),
+    });
+  }
+
+  function onRouteTimeChange(e: Event) {
+    clearQuarterPlan();
+    patchWilderness({
+      routeTimeQuarters: parseInt((e.currentTarget as HTMLInputElement).value, 10) || 0,
+      progress: 0,
+      ...resetKnownRouteEventState(),
+    });
+  }
+
+  async function checkUnmappedWildernessEvent(markExternal = false) {
+    if (!$isGM || $expedition.wilderness.routeMode !== "Unmapped Country") return;
+    const dieSides = eventConspicuous ? 4 : $expedition.wilderness.pace === "Cautious" ? 8 : 6;
+    const roll = markExternal ? 0 : (await rollDiceValues(1, dieSides, { rollTarget: "gm_only", showResults: true }))[0];
+
+    await patchWilderness({
+      wildernessEventCheckedDay: $expedition.wilderness.day,
+      wildernessEventLastDie: markExternal ? 0 : dieSides,
+      wildernessEventLastRoll: roll,
+      wildernessEventOccurred: markExternal ? false : roll === 1,
+    });
+  }
+
+  async function setKnownRouteEventBudget(value: number) {
+    if (!$isGM || $expedition.wilderness.routeMode !== "Known Route") return;
+    const budget = Math.max(0, Math.min(99, value));
+    await patchWilderness({
+      knownRouteEventBudget: budget,
+      knownRouteEventsResolved: Math.min($expedition.wilderness.knownRouteEventsResolved, budget),
+    });
+  }
+
+  async function resolveKnownRouteEvent() {
+    if (
+      !$isGM ||
+      $expedition.wilderness.knownRouteEventBudget < 0 ||
+      knownRouteEventsRemaining <= 0
+    ) return;
+    await patchWilderness({
+      knownRouteEventsResolved: $expedition.wilderness.knownRouteEventsResolved + 1,
+    });
+  }
+
+  async function setKnownRouteDangerous(value: boolean) {
+    if (!$isGM) return;
+    await patchWilderness({
+      knownRouteDangerous: value,
+      knownRouteEventBudget: -1,
+      knownRouteEventsResolved: 0,
+    });
+  }
+
+  async function setKnownRouteCautiousCommitment(value: boolean) {
+    if (!$isGM) return;
+    await patchWilderness({
+      knownRouteCautiousCommitment: value,
+      knownRouteEventBudget: -1,
+      knownRouteEventsResolved: 0,
     });
   }
 
@@ -968,6 +1095,11 @@
       progress: 0,
       routeTimeQuarters: 0,
       routeConfirmedDay: 0,
+      wildernessEventCheckedDay: 0,
+      wildernessEventLastDie: 0,
+      wildernessEventLastRoll: 0,
+      wildernessEventOccurred: false,
+      ...resetKnownRouteEventState(),
       assignments: [],
       makeCampLeaderId: "",
     });
@@ -1756,6 +1888,12 @@
       });
     }
 
+    const nextAssignments = assignmentsForQuarter(next.quarter);
+    const nextMakeCampLeaderId =
+      defaultActivityForQuarter(next.quarter) === null
+        ? $expedition.wilderness.makeCampLeaderId
+        : "";
+
     await patchWilderness({
       progress,
       quarter: next.quarter,
@@ -1776,6 +1914,8 @@
       forcedMarchAttemptsByPlayer: next.daysAdvanced ? {} : $expedition.wilderness.forcedMarchAttemptsByPlayer,
       forcedMarchAttemptKeys: next.daysAdvanced ? [] : $expedition.wilderness.forcedMarchAttemptKeys,
       sleptPlayerIdsToday: next.daysAdvanced ? [] : $expedition.wilderness.sleptPlayerIdsToday,
+      assignments: nextAssignments,
+      makeCampLeaderId: nextMakeCampLeaderId,
       companyNpcs,
     });
 
@@ -2253,7 +2393,7 @@
                 value={$expedition.wilderness.destination}
                 placeholder="Destination"
                 aria-label="Journey destination"
-                on:change={(e) => patchWilderness({ destination: e.currentTarget.value })}
+                on:change={onDestinationChange}
               />
             </div>
 
@@ -2266,7 +2406,7 @@
                     min="0"
                     disabled={!$isGM}
                     value={$expedition.wilderness.routeTimeQuarters}
-                    on:change={(e) => patchWilderness({ routeTimeQuarters: parseInt(e.currentTarget.value) || 0 })}
+                    on:change={onRouteTimeChange}
                   />
                   <span class="text-[10px] text-gray-500">Quarters</span>
                 </div>
