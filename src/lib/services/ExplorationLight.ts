@@ -131,8 +131,24 @@ export async function declareExplorationLight(
   input: Omit<ExplorationLightDeclaration, "nonce" | "ownerId" | "ownerName">,
 ): Promise<void> {
   if (!OBR.isAvailable) return;
+
+  let nextInput = input;
+  if (input.action === "extinguish") {
+    let pc = get(PlayerCharacterStore);
+    pc = { ...pc, gear: pc.gear.map((item) => ({ ...item })) };
+    const fuel = pc.gear.find((item) => item.id === input.fuelItemId);
+    if (activeUsage(fuel)) {
+      fuel.usageDie = stepDownDie(fuel.usageDie);
+      PlayerCharacterStore.set(pc);
+      nextInput = {
+        ...input,
+        fuelDie: fuel.usageDie,
+      };
+    }
+  }
+
   const declaration: ExplorationLightDeclaration = {
-    ...input,
+    ...nextInput,
     nonce: id("light"),
     ownerId: OBR.player.id,
     ownerName: await OBR.player.getName(),
