@@ -1315,6 +1315,11 @@
     });
   }
 
+  async function onCompanySupplyDieChange(id: string, e: Event) {
+    const usageDie = (e.currentTarget as HTMLSelectElement).value as CompanySupplyDie;
+    await patchCompanySupply(id, { usageDie });
+  }
+
   async function recordConsumptionResponse(
     response: ExpeditionDailyResponse,
     ordinaryRequired: boolean,
@@ -3327,10 +3332,7 @@
                     <select
                       class="ml-auto text-[10px] w-24"
                       value={stock.usageDie}
-                      on:change={(e) =>
-                        patchCompanySupply(stock.id, {
-                          usageDie: e.currentTarget.value as CompanySupplyDie,
-                        })}
+                      on:change={(e) => onCompanySupplyDieChange(stock.id, e)}
                     >
                       <option value="d6">d6</option>
                       <option value="d4">d4</option>
