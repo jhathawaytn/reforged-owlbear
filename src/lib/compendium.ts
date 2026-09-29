@@ -160,11 +160,11 @@ const foodWater: CompendiumMisc[] = [
 ];
 
 const light: CompendiumMisc[] = [
-  { category: "Light", name: "Torch Bundle", slots: 1, price: "3 SP", rarity: 1, notes: "d6 Usage Die", usageKind: "Fuel", usageDie: "d6" },
+  { category: "Light", name: "Torch Bundle", slots: 1, price: "3 SP", rarity: 1, notes: "d8 Usage Die; active torch checks every 3 Exploration Turns", usageKind: "Fuel", usageDie: "d8" },
   { category: "Light", name: "Lantern", slots: 1, price: "12 SP", rarity: 2, notes: "Durable, reusable" },
   { category: "Light", name: "Hooded Lantern", slots: 1, price: "18 SP", rarity: 2, notes: "Durable, reusable" },
   { category: "Light", name: "Bullseye Lantern", slots: 1, price: "18 SP", rarity: 2, notes: "Durable, reusable" },
-  { category: "Light", name: "Lamp Oil", slots: 1, price: "3 SP", rarity: 1, notes: "d6 Usage Die", usageKind: "Fuel", usageDie: "d6" },
+  { category: "Light", name: "Lamp Oil", slots: 1, price: "3 SP", rarity: 1, notes: "d10 Usage Die; active lantern checks every 3 Exploration Turns", usageKind: "Fuel", usageDie: "d10" },
 ];
 
 const medical: CompendiumMisc[] = [

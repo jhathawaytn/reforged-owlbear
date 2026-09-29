@@ -118,6 +118,7 @@ export type ExplorationActiveLight = {
   reachFeet: number;
   active: boolean;
   lastCheckTurn: number;
+  burnTurns: number;
 };
 
 export type ExplorationExpeditionState = {
@@ -221,7 +222,14 @@ function withDefaults(value: Partial<ExpeditionState> | undefined): ExpeditionSt
         deprivedFromRest: npc.deprivedFromRest ?? false,
       })),
     },
-    exploration: { ...base.exploration, ...(value.exploration ?? {}) },
+    exploration: {
+      ...base.exploration,
+      ...(value.exploration ?? {}),
+      activeLights: ((value.exploration?.activeLights ?? base.exploration.activeLights) as ExplorationActiveLight[]).map((light) => ({
+        ...light,
+        burnTurns: light.burnTurns ?? 0,
+      })),
+    },
   };
 }
 
