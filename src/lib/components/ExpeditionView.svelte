@@ -411,8 +411,9 @@
   }
   $: explorationHour = Math.floor(($expedition.exploration.turn - 1) / 6) + 1;
   $: explorationTurnInHour = (($expedition.exploration.turn - 1) % 6) + 1;
-  $: lightCheckpointDue =
-    explorationTurnInHour === 3 || explorationTurnInHour === 6;
+  $: lightChecksDueNextTurn = $expedition.exploration.activeLights.some(
+    (light) => light.active && ((light.burnTurns ?? 0) + 1) % 3 === 0,
+  );
   $: dungeonEventDue =
     $expedition.exploration.dungeonEventCheckedHour !== explorationHour;
   $: localActiveLights = $expedition.exploration.activeLights.filter(
@@ -460,11 +461,20 @@
 
     if (declaration.action === "extinguish") {
       if (index >= 0) {
-        lights[index] = { ...lights[index], active: false };
+        lights[index] = {
+          ...lights[index],
+          fuelDie: declaration.fuelDie,
+          active: false,
+        };
         await patchExploration({ activeLights: lights });
       }
       return;
     }
+
+    const existing = index >= 0 ? lights[index] : undefined;
+    const continuingSameBurn =
+      !!existing?.active &&
+      existing.fuelItemId === declaration.fuelItemId;
 
     const next: ExplorationActiveLight = {
       ownerId: declaration.ownerId,
@@ -477,7 +487,8 @@
       mode: declaration.mode,
       reachFeet: declaration.reachFeet,
       active: true,
-      lastCheckTurn: 0,
+      lastCheckTurn: continuingSameBurn ? existing?.lastCheckTurn ?? 0 : 0,
+      burnTurns: continuingSameBurn ? existing?.burnTurns ?? 0 : 0,
     };
     if (index >= 0) lights[index] = next;
     else lights.push(next);
@@ -534,7 +545,7 @@
       mode: light.mode,
       reachFeet: light.reachFeet,
     });
-    explorationMessage = `${light.sourceName} extinguished.`;
+    explorationMessage = `${light.sourceName} extinguished; ${light.fuelName} steps down one die.`;
   }
 
   async function markDungeonEventChecked() {
@@ -547,10 +558,17 @@
     explorationMessage = "";
     let lights = $expedition.exploration.activeLights.map((light) => ({ ...light }));
 
-    if (lightCheckpointDue) {
-      for (let index = 0; index < lights.length; index += 1) {
-        const light = lights[index];
-        if (!light.active) continue;
+    for (let index = 0; index < lights.length; index += 1) {
+      const light = lights[index];
+      if (!light.active) continue;
+
+      const burnTurns = (light.burnTurns ?? 0) + 1;
+      let nextLight: ExplorationActiveLight = {
+        ...light,
+        burnTurns,
+      };
+
+      if (burnTurns % 3 === 0) {
         const response = await requestExplorationLightCheck(
           light.ownerId,
           light.sourceItemId,
@@ -559,18 +577,26 @@
         if (!response) {
           explorationMessage +=
             `${light.ownerName}'s ${light.sourceName} did not answer its light Usage check. `;
-          continue;
+        } else {
+          nextLight = {
+            ...nextLight,
+            fuelDie: response.after,
+            active: !response.exhausted,
+            lastCheckTurn: $expedition.exploration.turn,
+          };
+          explorationMessage += response.exhausted
+            ? `${light.ownerName}'s ${light.sourceName} exhausted ${response.fuelName} and went out. `
+            : `${light.ownerName}'s ${light.sourceName}: ${response.before} rolled ${response.roll}, now ${response.after}. `;
         }
-        lights[index] = {
-          ...light,
-          fuelDie: response.after,
-          active: !response.exhausted,
-          lastCheckTurn: $expedition.exploration.turn,
-        };
-        explorationMessage += response.exhausted
-          ? `${light.ownerName}'s ${light.sourceName} exhausted ${response.fuelName} and went out. `
-          : `${light.ownerName}'s ${light.sourceName}: ${response.before} rolled ${response.roll}, now ${response.after}. `;
       }
+
+      if (light.sourceName === "Torch Bundle" && burnTurns >= 6) {
+        nextLight = { ...nextLight, active: false };
+        explorationMessage +=
+          `${light.ownerName}'s torch reached 6 Turns and went out. `;
+      }
+
+      lights[index] = nextLight;
     }
 
     await patchExploration({
@@ -3395,7 +3421,7 @@
               </div>
             </div>
             <span class="status-chip">
-              {lightCheckpointDue ? "CHECKPOINT THIS TURN" : `NEXT CHECK ${explorationTurnInHour < 3 ? "TURN 3" : "TURN 6"}`}
+              {lightChecksDueNextTurn ? "FUEL CHECK THIS TURN" : "FUEL CHECKS EVERY 3 BURN TURNS"}
             </span>
           </div>
 
@@ -3409,6 +3435,17 @@
                     <span class="text-gray-500">{light.mode}</span>
                   {/if}
                   <span class="ml-auto">{light.reachFeet} ft</span>
+                  {#if light.sourceName === "Torch Bundle"}
+                    <span class:font-bold={(light.burnTurns ?? 0) >= 4} class:text-amber-700={(light.burnTurns ?? 0) >= 4}>
+                      {(light.burnTurns ?? 0) >= 5
+                        ? "FINAL TURN"
+                        : (light.burnTurns ?? 0) >= 4
+                          ? "BURNING LOW"
+                          : `Torch ${(light.burnTurns ?? 0) + 1}/6`}
+                    </span>
+                  {:else}
+                    <span>{light.burnTurns ?? 0} burn Turns</span>
+                  {/if}
                   <span class="font-bold">{light.fuelName} {light.fuelDie}</span>
                 </div>
               {/each}
@@ -3504,10 +3541,9 @@
               </button>
             {/if}
             <div class="mt-2 text-[10px]">
-              Completing Turn {$expedition.exploration.turn}
-              {lightCheckpointDue
-                ? " will automatically roll each active carried light's Usage stock before the next Turn."
-                : " advances the shared clock by 10 minutes."}
+              Completing Turn {$expedition.exploration.turn} advances the shared clock by 10 minutes.
+              Each active light checks its governing Usage stock after every 3 burn Turns.
+              Torches warn on their 5th Turn and go out after their 6th.
             </div>
             <button class="primary-action mt-1" on:click={completeExplorationTurn}>
               Complete Exploration Turn
