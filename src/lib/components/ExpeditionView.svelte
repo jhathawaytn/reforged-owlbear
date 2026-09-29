@@ -22,6 +22,8 @@
     type ExplorationActiveLight,
     type ExplorationFormationRow,
     type ExplorationMovementMode,
+    type ExplorationActivity,
+    type ExplorationActivityAssignment,
     type ExpeditionAssignment,
     type WildernessActivity,
     type WildernessRole,
@@ -64,6 +66,11 @@
     type ExplorationLightMode,
     type ExplorationLightDeclaration,
   } from "../services/ExplorationLight";
+  import {
+    ExplorationActivityDeclarationStore,
+    declareExplorationActivity,
+    type ExplorationActivityDeclaration,
+  } from "../services/ExplorationActivities";
   import { newId } from "../utils";
 
   type TravelWorkflowStep =
@@ -137,6 +144,21 @@
     "Explored",
     "Rush",
   ];
+  const EXPLORATION_ACTIVITIES: ExplorationActivity[] = [
+    "None",
+    "Focused Search",
+    "Focused Listening",
+    "Dedicated Watch",
+    "Technical / Security Work",
+    "Force / Haul",
+    "Operate Mechanism",
+    "Other",
+  ];
+  const RUSH_INCOMPATIBLE_ACTIVITIES: ExplorationActivity[] = [
+    "Focused Search",
+    "Focused Listening",
+    "Dedicated Watch",
+  ];
 
   let company: CompanyMember[] = [];
   let quarterTasks: QuarterTask[] = [];
@@ -162,7 +184,10 @@
   let selectedLampOilId = "";
   let selectedLightMode: ExplorationLightMode = "open";
   let lastLightDeclarationNonce = "";
+  let lastActivityDeclarationNonce = "";
   let explorationMessage = "";
+  let localExplorationActivity: ExplorationActivity = "None";
+  let localExplorationDetail = "";
 
   $: {
     const merged = new Map<string, CompanyMember>();
@@ -433,6 +458,14 @@
       : $expedition.exploration.movementMode === "Explored"
         ? 2
         : 4;
+  $: explorationActivityConflicts = $expedition.exploration.activityAssignments.filter(
+    (assignment) =>
+      $expedition.exploration.movementMode === "Rush" &&
+      RUSH_INCOMPATIBLE_ACTIVITIES.includes(assignment.activity),
+  );
+  $: localActivityAssignment = $expedition.exploration.activityAssignments.find(
+    (assignment) => assignment.playerId === $CurrentPlayerId,
+  );
   $: localLostAttributes = lostAttributes($localPc);
   let preparedDailyRequestId = "";
   $: if ($PendingExpeditionDailyStore && $PendingExpeditionDailyStore.requestId !== preparedDailyRequestId) {
@@ -562,6 +595,84 @@
     explorationMessage = `${light.sourceName} extinguished; ${light.fuelName} steps down one die.`;
   }
 
+  async function handleActivityDeclaration(
+    declaration: ExplorationActivityDeclaration,
+  ) {
+    if (!$isGM) return;
+    const assignments = [...$expedition.exploration.activityAssignments];
+    const index = assignments.findIndex(
+      (assignment) => assignment.playerId === declaration.playerId,
+    );
+    const next: ExplorationActivityAssignment = {
+      playerId: declaration.playerId,
+      playerName: declaration.playerName,
+      activity: declaration.activity,
+      detail: declaration.detail,
+    };
+    if (index >= 0) assignments[index] = next;
+    else assignments.push(next);
+    await patchExploration({ activityAssignments: assignments });
+  }
+
+  $: if (
+    $isGM &&
+    $ExplorationActivityDeclarationStore &&
+    $ExplorationActivityDeclarationStore.nonce !== lastActivityDeclarationNonce
+  ) {
+    lastActivityDeclarationNonce = $ExplorationActivityDeclarationStore.nonce;
+    void handleActivityDeclaration($ExplorationActivityDeclarationStore);
+  }
+
+  async function submitLocalExplorationActivity() {
+    await declareExplorationActivity(
+      localExplorationActivity,
+      localExplorationDetail,
+    );
+    explorationMessage =
+      localExplorationActivity === "None"
+        ? "No substantial activity declared for this Turn."
+        : `${localExplorationActivity} declared for this Turn.`;
+  }
+
+  async function setExplorationActivityFor(
+    member: CompanyMember,
+    activity: ExplorationActivity,
+    detail?: string,
+  ) {
+    if (!$isGM) return;
+    const assignments = [...$expedition.exploration.activityAssignments];
+    const index = assignments.findIndex(
+      (assignment) => assignment.playerId === member.id,
+    );
+    const existing = index >= 0 ? assignments[index] : undefined;
+    const next: ExplorationActivityAssignment = {
+      playerId: member.id,
+      playerName: member.name,
+      activity,
+      detail: detail ?? existing?.detail ?? "",
+    };
+    if (index >= 0) assignments[index] = next;
+    else assignments.push(next);
+    await patchExploration({ activityAssignments: assignments });
+  }
+
+  function onExplorationActivityChange(member: CompanyMember, event: Event) {
+    void setExplorationActivityFor(
+      member,
+      (event.currentTarget as HTMLSelectElement).value as ExplorationActivity,
+    );
+  }
+
+  function onExplorationActivityDetailChange(member: CompanyMember, event: Event) {
+    void setExplorationActivityFor(
+      member,
+      $expedition.exploration.activityAssignments.find(
+        (assignment) => assignment.playerId === member.id,
+      )?.activity ?? "None",
+      (event.currentTarget as HTMLInputElement).value,
+    );
+  }
+
   async function addFormationRow() {
     if (!$isGM) return;
     await patchExploration({
@@ -656,6 +767,7 @@
     await patchExploration({
       turn: $expedition.exploration.turn + 1,
       activeLights: lights,
+      activityAssignments: [],
     });
   }
 
@@ -3498,6 +3610,103 @@
                 Normal movement into new ground is already cautious; extra care is a specific substantial activity rather than a slower universal pace.
               </div>
             {/if}
+          </div>
+        </div>
+
+        <div class="mt-2 border-2 border-black rounded-md p-2 bg-white">
+          <div class="flex items-center justify-between gap-2">
+            <div>
+              <div class="font-bold text-xs">Substantial Activities</div>
+              <div class="text-[9px] text-gray-500">
+                Each conscious, available character may take one substantial activity during the shared Turn. Compatible work happens concurrently.
+              </div>
+            </div>
+            <span class="status-chip">
+              {$expedition.exploration.activityAssignments.filter((assignment) => assignment.activity !== "None").length} DECLARED
+            </span>
+          </div>
+
+          {#if !$isGM}
+            <div class="mt-2 border rounded p-2 bg-gray-50">
+              <div class="grid grid-cols-1 md:grid-cols-[180px_1fr_auto] gap-1 items-end">
+                <label class="text-[10px]">
+                  Your Activity
+                  <select class="w-full" bind:value={localExplorationActivity}>
+                    {#each EXPLORATION_ACTIVITIES as activity}
+                      <option value={activity}>{activity}</option>
+                    {/each}
+                  </select>
+                </label>
+                <label class="text-[10px]">
+                  Focus / Target
+                  <input
+                    class="w-full"
+                    bind:value={localExplorationDetail}
+                    placeholder={localExplorationActivity === "Focused Search"
+                      ? "Where/how are you searching, and what do you want to learn?"
+                      : localExplorationActivity === "Dedicated Watch"
+                        ? "Direction or threat watched"
+                        : "What are you doing?"}
+                  />
+                </label>
+                <button class="primary-action" on:click={submitLocalExplorationActivity}>Declare</button>
+              </div>
+              {#if localActivityAssignment}
+                <div class="text-[9px] text-gray-500 mt-1">
+                  Recorded: <span class="font-bold">{localActivityAssignment.activity}</span>
+                  {localActivityAssignment.detail ? ` — ${localActivityAssignment.detail}` : ""}
+                </div>
+              {/if}
+            </div>
+          {/if}
+
+          {#if $isGM}
+            <div class="flex flex-col gap-1 mt-2">
+              {#each company as member (member.id)}
+                {@const assignment = $expedition.exploration.activityAssignments.find((entry) => entry.playerId === member.id)}
+                <div class="grid grid-cols-[minmax(90px,0.8fr)_minmax(130px,1fr)_minmax(160px,1.5fr)] gap-1 items-center border rounded px-2 py-1 bg-gray-50 text-[10px]">
+                  <div class="font-bold truncate">{member.name}</div>
+                  <select
+                    value={assignment?.activity ?? "None"}
+                    on:change={(event) => onExplorationActivityChange(member, event)}
+                  >
+                    {#each EXPLORATION_ACTIVITIES as activity}
+                      <option value={activity}>{activity}</option>
+                    {/each}
+                  </select>
+                  <input
+                    value={assignment?.detail ?? ""}
+                    placeholder={assignment?.activity === "Focused Search"
+                      ? "where/how + intended information"
+                      : assignment?.activity === "Dedicated Watch"
+                        ? "direction / threat"
+                        : "focus / target"}
+                    on:change={(event) => onExplorationActivityDetailChange(member, event)}
+                  />
+                </div>
+              {/each}
+            </div>
+          {:else if $expedition.exploration.activityAssignments.length}
+            <div class="flex flex-col gap-1 mt-2">
+              {#each $expedition.exploration.activityAssignments as assignment (assignment.playerId)}
+                <div class="border rounded px-2 py-1 bg-gray-50 text-[10px]">
+                  <span class="font-bold">{assignment.playerName}</span>
+                  <span> · {assignment.activity}</span>
+                  {#if assignment.detail}<span class="text-gray-500"> — {assignment.detail}</span>{/if}
+                </div>
+              {/each}
+            </div>
+          {/if}
+
+          {#if explorationActivityConflicts.length}
+            <div class="mt-1 border border-amber-400 bg-amber-50 rounded px-2 py-1 text-[10px] text-amber-800 font-bold">
+              Rush conflict: {explorationActivityConflicts.map((assignment) => `${assignment.playerName}: ${assignment.activity}`).join(", ")}.
+              Focused Search, Focused Listening, and Dedicated Watch cannot be maintained while Rushing.
+            </div>
+          {/if}
+
+          <div class="mt-1 text-[9px] text-gray-500">
+            Immediate Read and ordinary alertness are free. Opening an ordinary door, drawing a tool, asking a clarifying question, or stepping across the room is not normally a separate Exploration Turn.
           </div>
         </div>
 
