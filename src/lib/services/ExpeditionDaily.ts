@@ -214,10 +214,18 @@ export async function resolvePendingConsumption(
     request.ordinaryRequired && choice.rationSource !== "none" && choice.rationSource !== "shared"
       ? pc.gear.find((gear) => gear.id === choice.rationSource)
       : undefined;
-  const ordinaryWaterItem =
+  let ordinaryWaterItem =
     request.ordinaryRequired && choice.waterSource !== "none" && choice.waterSource !== "shared"
       ? pc.gear.find((gear) => gear.id === choice.waterSource)
       : undefined;
+  if (
+    request.ordinaryRequired &&
+    choice.waterSource !== "none" &&
+    choice.waterSource !== "shared" &&
+    !activeUsageItem(ordinaryWaterItem, "Water")
+  ) {
+    ordinaryWaterItem = pc.gear.find((gear) => activeUsageItem(gear, "Water"));
+  }
 
   // Ordinary Food and Water are independent stocks, so launch their visible
   // Usage rolls together. Extra Water remains sequential because the active
