@@ -24,6 +24,8 @@
     type ExplorationMovementMode,
     type ExplorationActivity,
     type ExplorationActivityAssignment,
+    type DungeonCampMeal,
+    type DungeonCampResult,
     type ExpeditionAssignment,
     type WildernessActivity,
     type WildernessRole,
@@ -154,6 +156,7 @@
     "Focused Listening",
     "Dedicated Watch",
   ];
+  const DUNGEON_CAMP_MEALS: DungeonCampMeal[] = ["None", "Simple", "Fancy"];
 
   let company: CompanyMember[] = [];
   let quarterTasks: QuarterTask[] = [];
@@ -661,6 +664,84 @@
     void setExplorationMovement(
       (event.currentTarget as HTMLSelectElement).value as ExplorationMovementMode,
     );
+  }
+
+  async function rollDungeonCamp() {
+    if (!$isGM) return;
+    const [natural] = await rollDiceValues(1, 20, {
+      rollTarget: "gm_only",
+      showResults: true,
+    });
+    const modifier =
+      $expedition.exploration.dungeonCampMeal === "Fancy"
+        ? -2
+        : $expedition.exploration.dungeonCampMeal === "Simple"
+          ? -1
+          : 0;
+    const modified = natural + modifier;
+    let result: DungeonCampResult;
+    if (natural === 20) result = "Camp Disaster";
+    else if (modified <= 13) result = "Quiet Night";
+    else result = "Rough Night";
+
+    let resultHour = 0;
+    if (result !== "Quiet Night") {
+      [resultHour] = await rollDiceValues(1, 6, {
+        rollTarget: "gm_only",
+        showResults: true,
+      });
+    }
+
+    await patchExploration({
+      dungeonCampNaturalRoll: natural,
+      dungeonCampModifiedRoll: modified,
+      dungeonCampResult: result,
+      dungeonCampResultHour: resultHour,
+    });
+  }
+
+  async function setDungeonCampMeal(meal: DungeonCampMeal) {
+    if (!$isGM) return;
+    await patchExploration({
+      dungeonCampMeal: meal,
+      dungeonCampNaturalRoll: 0,
+      dungeonCampModifiedRoll: 0,
+      dungeonCampResult: "",
+      dungeonCampResultHour: 0,
+    });
+  }
+
+  function onDungeonCampMealChange(event: Event) {
+    void setDungeonCampMeal(
+      (event.currentTarget as HTMLSelectElement).value as DungeonCampMeal,
+    );
+  }
+
+  async function completeSleepQuarter() {
+    if (!$isGM) return;
+    if (!$expedition.exploration.dungeonCampResult) {
+      explorationMessage = "Roll the Dungeon Camp result before completing Sleep.";
+      return;
+    }
+    if ($expedition.exploration.dungeonCampResult === "Camp Disaster") {
+      explorationMessage =
+        "Camp Disaster interrupts Sleep. Resolve the danger and re-establish a viable camp before completing a Sleep Quarter.";
+      return;
+    }
+
+    const nextTurn = $expedition.exploration.turn + 36;
+    await patchExploration({
+      turn: nextTurn,
+      activityAssignments: [],
+      dungeonCampMeal: "None",
+      dungeonCampNaturalRoll: 0,
+      dungeonCampModifiedRoll: 0,
+      dungeonCampResult: "",
+      dungeonCampResultHour: 0,
+      dungeonEventCheckedHour: Math.floor((nextTurn - 1) / 6) + 1,
+    });
+    explorationMessage =
+      "Sleep Quarter completed: 6 hours elapsed (36 Exploration Turns). Daily clocks and resource requirements continue.";
   }
 
   async function markDungeonEventChecked() {
@@ -3768,6 +3849,82 @@
         </div>
 
         {#if $isGM}
+          <div class="mt-2 border-2 border-black rounded-md p-2 bg-white text-xs">
+            <div class="flex items-center justify-between gap-2">
+              <div>
+                <div class="font-bold">Dungeon Camp / Sleep Quarter</div>
+                <div class="text-[9px] text-gray-500">
+                  Sleeping in an active dangerous site uses one 6-hour Sleep Quarter (36 Exploration Turns) and one secret Dungeon Camp roll.
+                </div>
+              </div>
+              <span class="status-chip">6 HOURS · 36 TURNS</span>
+            </div>
+
+            <div class="flex flex-wrap items-end gap-2 mt-2">
+              <label class="text-[10px]">
+                Shared Meal
+                <select
+                  value={$expedition.exploration.dungeonCampMeal}
+                  on:change={onDungeonCampMealChange}
+                >
+                  {#each DUNGEON_CAMP_MEALS as meal}
+                    <option value={meal}>
+                      {meal === "None" ? "None / ordinary food (+0)" : meal === "Simple" ? "Simple Meal (−1)" : "Fancy Meal (−2)"}
+                    </option>
+                  {/each}
+                </select>
+              </label>
+              <button class="border rounded px-2 py-1 text-[10px]" on:click={rollDungeonCamp}>
+                Roll Secret Dungeon Camp
+              </button>
+            </div>
+
+            {#if $expedition.exploration.dungeonCampResult}
+              <div class="mt-2 border rounded p-2 bg-gray-50">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-bold">{$expedition.exploration.dungeonCampResult}</span>
+                  <span>
+                    d20 {$expedition.exploration.dungeonCampNaturalRoll}
+                    {#if $expedition.exploration.dungeonCampMeal !== "None"}
+                      → {$expedition.exploration.dungeonCampModifiedRoll}
+                    {/if}
+                  </span>
+                  {#if $expedition.exploration.dungeonCampResultHour}
+                    <span class="status-chip">
+                      MANIFESTS HOUR {$expedition.exploration.dungeonCampResultHour}
+                    </span>
+                  {/if}
+                </div>
+                {#if $expedition.exploration.dungeonCampResult === "Quiet Night"}
+                  <div class="text-[10px] text-gray-600 mt-1">
+                    No camp timing roll is needed. Sleep may complete if no other consequence interrupts it.
+                  </div>
+                {:else if $expedition.exploration.dungeonCampResult === "Rough Night"}
+                  <div class="text-[10px] text-amber-800 mt-1 font-bold">
+                    Rough Night normally allows Sleep to complete, but achieved Rest quality cannot exceed Perilous.
+                  </div>
+                {:else}
+                  <div class="text-[10px] text-red-700 mt-1 font-bold">
+                    Camp Disaster interrupts Sleep. Resolve the danger before a Sleep Quarter can complete.
+                  </div>
+                {/if}
+              </div>
+            {/if}
+
+            <div class="flex flex-wrap gap-2 mt-2">
+              <button
+                class="primary-action"
+                disabled={!$expedition.exploration.dungeonCampResult || $expedition.exploration.dungeonCampResult === "Camp Disaster"}
+                on:click={completeSleepQuarter}
+              >
+                Complete Sleep Quarter
+              </button>
+              <div class="text-[9px] text-gray-500 self-center max-w-[440px]">
+                This advances elapsed Exploration time by 36 Turns. Routine hourly Dungeon Event generation is replaced by the Dungeon Camp roll during this stationary Sleep period.
+              </div>
+            </div>
+          </div>
+
           <div class="mt-2 border rounded-md p-2 bg-slate-50 text-xs">
             <div class="flex items-center justify-between gap-2">
               <div>
