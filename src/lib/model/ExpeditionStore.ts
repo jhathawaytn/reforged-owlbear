@@ -128,6 +128,23 @@ export type ExplorationFormationRow = {
 
 export type ExplorationMovementMode = "New / Unsecured" | "Explored" | "Rush";
 
+export type ExplorationActivity =
+  | "None"
+  | "Focused Search"
+  | "Focused Listening"
+  | "Dedicated Watch"
+  | "Technical / Security Work"
+  | "Force / Haul"
+  | "Operate Mechanism"
+  | "Other";
+
+export type ExplorationActivityAssignment = {
+  playerId: string;
+  playerName: string;
+  activity: ExplorationActivity;
+  detail: string;
+};
+
 export type ExplorationExpeditionState = {
   turn: number;
   siteName: string;
@@ -137,6 +154,7 @@ export type ExplorationExpeditionState = {
   dungeonEventCheckedHour: number;
   formationRows: ExplorationFormationRow[];
   movementMode: ExplorationMovementMode;
+  activityAssignments: ExplorationActivityAssignment[];
 };
 
 export type ExpeditionState = {
@@ -207,6 +225,7 @@ export const defaultExpeditionState = (): ExpeditionState => ({
     dungeonEventCheckedHour: 0,
     formationRows: [],
     movementMode: "New / Unsecured",
+    activityAssignments: [],
   },
 });
 
