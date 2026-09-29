@@ -721,6 +721,20 @@
     });
   }
 
+  async function exitExplorationLocation() {
+    if (!$isGM) return;
+    await saveExpeditionState({
+      ...$expedition,
+      mode: "wilderness",
+      exploration: {
+        ...$expedition.exploration,
+        siteArea: "",
+        activeLights: [],
+        activityAssignments: [],
+      },
+    });
+  }
+
   async function setMode(mode: ExpeditionMode) {
     if (!$isGM) return;
     await saveExpeditionState({ ...$expedition, mode });
@@ -3775,9 +3789,20 @@
               Each active light checks its governing Usage stock after every 3 burn Turns.
               Torches warn on their 5th Turn and go out after their 6th.
             </div>
-            <button class="primary-action mt-1" on:click={completeExplorationTurn}>
-              Complete Exploration Turn
-            </button>
+            <div class="flex flex-wrap gap-2 mt-1">
+              <button class="primary-action" on:click={completeExplorationTurn}>
+                Complete Exploration Turn
+              </button>
+              <button
+                class="border border-black rounded-md px-3 py-1.5 text-xs font-bold bg-white"
+                on:click={exitExplorationLocation}
+              >
+                Exit Location
+              </button>
+            </div>
+            <div class="text-[9px] text-gray-500 mt-1">
+              Exit Location ends active Exploration pressure and returns to Wilderness without resetting the continuing Exploration clock or inventory state.
+            </div>
           </div>
         {/if}
 
