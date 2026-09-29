@@ -15,6 +15,8 @@ import { resolveRestForCurrentCharacter, type RestResolution } from "./RestRecov
 const REQUEST_KEY = "rodeo.owlbear.reforged-sheet/expedition-daily-request";
 const RESULT_KEY = "rodeo.owlbear.reforged-sheet/expedition-daily-result";
 const CLOSEOUT_KEY = "rodeo.owlbear.reforged-sheet/expedition-day-closeout";
+const COMPANY_CONSUMPTION_CONFIRM_KEY =
+  "rodeo.owlbear.reforged-sheet/company-consumption-confirm";
 
 export type ExpeditionDailyRequest =
   | {
@@ -25,6 +27,8 @@ export type ExpeditionDailyRequest =
       ordinaryThreshold: 2 | 3;
       ordinaryRequired: boolean;
       extraWaterRolls: number;
+      companyRationsAvailable?: boolean;
+      companyWaterAvailable?: boolean;
       note?: string;
       requestedBy: string;
     }
@@ -47,6 +51,7 @@ export type UsageResolution = {
   suppliedUse: boolean;
   category: "Food" | "Water";
   ordinary: boolean;
+  companyStockId?: string;
 };
 
 export type ExpeditionDailyResponse = {
@@ -59,6 +64,8 @@ export type ExpeditionDailyResponse = {
   foodSatisfied?: boolean;
   waterSatisfied?: boolean;
   extraWaterRollsResolved?: number;
+  companyRationsRequested?: boolean;
+  companyWaterRequested?: boolean;
   usage?: UsageResolution[];
   rest?: RestResolution;
 };
@@ -146,6 +153,29 @@ export function initExpeditionDaily(): void {
     PlayerCharacterStore.set(pc);
     if (notes.length) showPopover(`Day ${closeout.day} closeout: ${notes.join(" ")}`);
   });
+
+  OBR.broadcast.onMessage(COMPANY_CONSUMPTION_CONFIRM_KEY, ({ data }) => {
+    const response = data as ExpeditionDailyResponse;
+    if (
+      !response ||
+      response.kind !== "Consumption" ||
+      response.targetPlayerId !== OBR.player.id
+    ) return;
+
+    let pc = get(PlayerCharacterStore);
+    if (response.foodSatisfied) pc = clearDeprivationCause(pc, "Food");
+    if (response.waterSatisfied) pc = clearDeprivationCause(pc, "Water");
+    else pc = addDeprivationCause(pc, "Water");
+    PlayerCharacterStore.set(pc);
+
+    const last = get(LastExpeditionDailyStore);
+    if (last?.requestId === response.requestId) {
+      LastExpeditionDailyStore.set(response);
+    }
+    showPopover(
+      `Company supplies resolved: Food ${response.foodSatisfied ? "satisfied" : "not satisfied"}; Water ${response.waterSatisfied ? "satisfied" : "not satisfied"}.`,
+    );
+  });
 }
 
 export async function requestExpeditionDaily(
@@ -174,6 +204,17 @@ export async function requestExpeditionDaily(
 
     OBR.broadcast.sendMessage(REQUEST_KEY, request, { destination: "ALL" });
   });
+}
+
+export function confirmCompanyConsumptionResult(
+  response: ExpeditionDailyResponse,
+): void {
+  if (!OBR.isAvailable || response.kind !== "Consumption") return;
+  OBR.broadcast.sendMessage(
+    COMPANY_CONSUMPTION_CONFIRM_KEY,
+    response,
+    { destination: "ALL" },
+  );
 }
 
 export function applyDayCloseout(
@@ -209,6 +250,10 @@ export async function resolvePendingConsumption(
   const totalWaterRolls = (request.ordinaryRequired ? 1 : 0) + Math.max(0, request.extraWaterRolls);
   let waterSatisfied = totalWaterRolls === 0;
   const extraWaterRollsResolved = request.extraWaterRolls;
+  const companyRationsRequested =
+    request.ordinaryRequired && choice.rationSource === "shared";
+  const companyWaterRequested =
+    totalWaterRolls > 0 && choice.waterSource === "shared";
 
   const rationItem =
     request.ordinaryRequired && choice.rationSource !== "none" && choice.rationSource !== "shared"
@@ -236,7 +281,7 @@ export async function resolvePendingConsumption(
 
   if (request.ordinaryRequired) {
     if (choice.rationSource === "shared") {
-      foodSatisfied = true;
+      foodSatisfied = false;
     } else if (activeUsageItem(rationItem, "Rations")) {
       foodRollIndex = ordinaryRolls.length;
       ordinaryRolls.push(rollUsage(rationItem, request.ordinaryThreshold, "Food", true));
@@ -244,14 +289,14 @@ export async function resolvePendingConsumption(
     }
 
     if (choice.waterSource === "shared") {
-      waterSatisfied = true;
+      waterSatisfied = false;
     } else if (activeUsageItem(ordinaryWaterItem, "Water")) {
       waterRollIndex = ordinaryRolls.length;
       ordinaryRolls.push(rollUsage(ordinaryWaterItem, request.ordinaryThreshold, "Water", true));
       waterSatisfied = true;
     }
   } else if (choice.waterSource === "shared") {
-    waterSatisfied = true;
+    waterSatisfied = false;
   }
 
   const ordinaryResults = await Promise.all(ordinaryRolls);
@@ -283,10 +328,12 @@ export async function resolvePendingConsumption(
     waterSatisfied = false;
   }
 
-  if (waterSatisfied) {
-    pc = clearDeprivationCause(pc, "Water");
-  } else {
-    pc = addDeprivationCause(pc, "Water");
+  if (!companyWaterRequested) {
+    if (waterSatisfied) {
+      pc = clearDeprivationCause(pc, "Water");
+    } else {
+      pc = addDeprivationCause(pc, "Water");
+    }
   }
 
   PlayerCharacterStore.set(pc);
@@ -301,6 +348,8 @@ export async function resolvePendingConsumption(
     foodSatisfied,
     waterSatisfied,
     extraWaterRollsResolved,
+    companyRationsRequested,
+    companyWaterRequested,
     usage,
   };
 
