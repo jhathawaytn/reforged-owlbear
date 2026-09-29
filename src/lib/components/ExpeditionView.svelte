@@ -1016,6 +1016,7 @@
     let role = current.role;
 
     if (activity === "Stand Watch" && member && !standWatchEligible(member)) {
+      (e.currentTarget as HTMLSelectElement).value = current.activity;
       quarterMessage = `${member.name} is not eligible to Stand Watch with their current NPC Job/Type.`;
       return;
     }
@@ -3018,7 +3019,12 @@
                   Activity
                   <select disabled={!$isGM} value={assignment.activity} on:change={(e) => onActivityChange(p.id, e)}>
                     {#each ACTIVITIES as activity}
-                      <option value={activity}>{activity}</option>
+                      <option
+                        value={activity}
+                        disabled={activity === "Stand Watch" && !standWatchEligible(p)}
+                      >
+                        {activity}
+                      </option>
                     {/each}
                   </select>
                 </label>
