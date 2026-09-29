@@ -20,6 +20,8 @@
     type WildernessExpeditionState,
     type ExplorationExpeditionState,
     type ExplorationActiveLight,
+    type ExplorationFormationRow,
+    type ExplorationMovementMode,
     type ExpeditionAssignment,
     type WildernessActivity,
     type WildernessRole,
@@ -130,6 +132,11 @@
     "Other",
   ];
   const RANKS = [0, 1, 2, 3, 4];
+  const EXPLORATION_MOVEMENT: ExplorationMovementMode[] = [
+    "New / Unsecured",
+    "Explored",
+    "Rush",
+  ];
 
   let company: CompanyMember[] = [];
   let quarterTasks: QuarterTask[] = [];
@@ -419,6 +426,16 @@
   $: localActiveLights = $expedition.exploration.activeLights.filter(
     (light) => light.ownerId === $CurrentPlayerId && light.active,
   );
+  $: formationIds = $expedition.exploration.formationRows.flatMap((row) =>
+    [row.leftId, row.rightId].filter(Boolean),
+  );
+  $: formationHasDuplicates = new Set(formationIds).size !== formationIds.length;
+  $: movementAreaLimit =
+    $expedition.exploration.movementMode === "New / Unsecured"
+      ? 1
+      : $expedition.exploration.movementMode === "Explored"
+        ? 2
+        : 4;
   $: localLostAttributes = lostAttributes($localPc);
   let preparedDailyRequestId = "";
   $: if ($PendingExpeditionDailyStore && $PendingExpeditionDailyStore.requestId !== preparedDailyRequestId) {
@@ -546,6 +563,46 @@
       reachFeet: light.reachFeet,
     });
     explorationMessage = `${light.sourceName} extinguished; ${light.fuelName} steps down one die.`;
+  }
+
+  async function addFormationRow() {
+    if (!$isGM) return;
+    await patchExploration({
+      formationRows: [
+        ...$expedition.exploration.formationRows,
+        { leftId: "", rightId: "" },
+      ],
+    });
+  }
+
+  async function removeFormationRow(index: number) {
+    if (!$isGM) return;
+    await patchExploration({
+      formationRows: $expedition.exploration.formationRows.filter((_, i) => i !== index),
+    });
+  }
+
+  async function setFormationMember(
+    index: number,
+    side: keyof ExplorationFormationRow,
+    memberId: string,
+  ) {
+    if (!$isGM) return;
+    const rows = $expedition.exploration.formationRows.map((row, i) =>
+      i === index ? { ...row, [side]: memberId } : row,
+    );
+    await patchExploration({ formationRows: rows });
+  }
+
+  async function setExplorationMovement(mode: ExplorationMovementMode) {
+    if (!$isGM) return;
+    await patchExploration({ movementMode: mode });
+  }
+
+  function onExplorationMovementChange(event: Event) {
+    void setExplorationMovement(
+      (event.currentTarget as HTMLSelectElement).value as ExplorationMovementMode,
+    );
   }
 
   async function markDungeonEventChecked() {
@@ -3412,6 +3469,41 @@
           </label>
         </div>
 
+        <div class="mt-2 border rounded-md p-2 bg-gray-50">
+          <div class="flex items-center justify-between gap-2">
+            <div>
+              <div class="font-bold text-xs">Movement This Turn</div>
+              <div class="text-[9px] text-gray-500">
+                Site Areas, not feet: new/unsecured 1 · explored 2 · Rush 4.
+              </div>
+            </div>
+            <span class="status-chip">MAX {movementAreaLimit} {movementAreaLimit === 1 ? "AREA" : "AREAS"}</span>
+          </div>
+          <div class="flex flex-wrap items-end gap-2 mt-1 text-[10px]">
+            <label>
+              Ground / Pace
+              <select
+                disabled={!$isGM}
+                value={$expedition.exploration.movementMode}
+                on:change={onExplorationMovementChange}
+              >
+                {#each EXPLORATION_MOVEMENT as mode}
+                  <option value={mode}>{mode}</option>
+                {/each}
+              </select>
+            </label>
+            {#if $expedition.exploration.movementMode === "Rush"}
+              <div class="text-amber-700 font-bold max-w-[360px]">
+                Rush is only for explored, currently passable ground. Focused Search, Focused Listening, and dedicated Watch cannot be maintained while Rushing.
+              </div>
+            {:else if $expedition.exploration.movementMode === "New / Unsecured"}
+              <div class="text-gray-500 max-w-[360px]">
+                Normal movement into new ground is already cautious; extra care is a specific substantial activity rather than a slower universal pace.
+              </div>
+            {/if}
+          </div>
+        </div>
+
         <div class="mt-3 border-2 border-black rounded-md p-2 bg-white">
           <div class="flex items-center justify-between gap-2">
             <div>
@@ -3568,19 +3660,84 @@
       </div>
 
       <div class="exp-cell min-h-0 overflow-y-auto">
-        <h2>COMPANY</h2>
-        {#if company.length}
+        <div class="flex items-center justify-between gap-2">
+          <h2>MARCHING FORMATION</h2>
+          {#if $isGM}
+            <button class="border rounded px-2 py-1 text-[10px]" on:click={addFormationRow}>Add Row</button>
+          {/if}
+        </div>
+        <div class="text-[9px] text-gray-500 mt-1">
+          Front to rear. Left / right within a row matters when the space allows it; constrictions compress the recorded order.
+        </div>
+
+        {#if $expedition.exploration.formationRows.length}
           <div class="flex flex-col gap-1 mt-2">
-            {#each company as p}
-              <div class="border rounded-md px-2 py-1 text-xs flex items-center gap-2">
-                <i class="material-icons text-sm">person</i>
-                <span class="truncate">{p.name}</span>
+            {#each $expedition.exploration.formationRows as row, index}
+              <div class="border rounded p-1 bg-gray-50">
+                <div class="flex items-center gap-1 text-[9px] font-bold">
+                  <span>ROW {index + 1}</span>
+                  {#if $isGM}
+                    <button class="ml-auto border rounded px-1" on:click={() => removeFormationRow(index)}>×</button>
+                  {/if}
+                </div>
+                <div class="grid grid-cols-2 gap-1 mt-1">
+                  <label class="text-[9px]">
+                    Left
+                    <select
+                      class="w-full"
+                      disabled={!$isGM}
+                      value={row.leftId}
+                      on:change={(e) => setFormationMember(index, "leftId", e.currentTarget.value)}
+                    >
+                      <option value="">—</option>
+                      {#each company as member}
+                        <option value={member.id}>{member.name}</option>
+                      {/each}
+                    </select>
+                  </label>
+                  <label class="text-[9px]">
+                    Right
+                    <select
+                      class="w-full"
+                      disabled={!$isGM}
+                      value={row.rightId}
+                      on:change={(e) => setFormationMember(index, "rightId", e.currentTarget.value)}
+                    >
+                      <option value="">—</option>
+                      {#each company as member}
+                        <option value={member.id}>{member.name}</option>
+                      {/each}
+                    </select>
+                  </label>
+                </div>
               </div>
             {/each}
           </div>
         {:else}
-          <div class="text-xs text-gray-400">No player characters currently connected.</div>
+          <div class="text-[10px] text-gray-400 mt-2">No formation recorded.</div>
         {/if}
+
+        {#if formationHasDuplicates}
+          <div class="mt-1 border border-red-300 bg-red-50 rounded px-2 py-1 text-[10px] text-red-700 font-bold">
+            A Company member appears more than once in the formation.
+          </div>
+        {/if}
+
+        <div class="mt-3 border-t pt-2">
+          <h2>COMPANY</h2>
+          {#if company.length}
+            <div class="flex flex-col gap-1 mt-2">
+              {#each company as p}
+                <div class="border rounded-md px-2 py-1 text-xs flex items-center gap-2">
+                  <i class="material-icons text-sm">{p.source === "npc" ? "badge" : "person"}</i>
+                  <span class="truncate">{p.name}</span>
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <div class="text-xs text-gray-400">No player characters currently connected.</div>
+          {/if}
+        </div>
       </div>
     </div>
   {/if}
