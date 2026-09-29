@@ -19,6 +19,7 @@
     type TravelWeatherEffect,
     type WildernessExpeditionState,
     type ExplorationExpeditionState,
+    type ExplorationActiveLight,
     type ExpeditionAssignment,
     type WildernessActivity,
     type WildernessRole,
@@ -41,7 +42,7 @@
   } from "../services/ExpeditionRolls";
   import { rollDiceValues, rollReforgedSave } from "../services/DicePlus";
   import { PlayerCharacterStore as localPc } from "../model/ReforgedCharacter";
-  import type { Attribute } from "../types";
+  import type { Attribute, GearItem } from "../types";
   import { lostAttributes } from "../services/RestRecovery";
   import {
     PendingExpeditionDailyStore,
@@ -52,6 +53,15 @@
     applyDayCloseout,
     type ExpeditionDailyResponse,
   } from "../services/ExpeditionDaily";
+  import {
+    ExplorationLightDeclarationStore,
+    declareExplorationLight,
+    requestExplorationLightCheck,
+    lightReach,
+    isLantern,
+    type ExplorationLightMode,
+    type ExplorationLightDeclaration,
+  } from "../services/ExplorationLight";
   import { newId } from "../utils";
 
   type TravelWorkflowStep =
@@ -141,6 +151,11 @@
   let npcLevel = 1;
   let npcNotes = "";
   let eventConspicuous = false;
+  let selectedLightSourceId = "";
+  let selectedLampOilId = "";
+  let selectedLightMode: ExplorationLightMode = "open";
+  let lastLightDeclarationNonce = "";
+  let explorationMessage = "";
 
   $: {
     const merged = new Map<string, CompanyMember>();
@@ -377,6 +392,38 @@
   $: localWaterItems = $localPc.gear.filter(
     (item) => item.usageKind === "Water" && item.usageDie && item.usageDie !== "depleted",
   );
+  $: localLightSources = $localPc.gear.filter(
+    (item) =>
+      (item.name === "Torch Bundle" && item.usageDie && item.usageDie !== "depleted") ||
+      ["Lantern", "Hooded Lantern", "Bullseye Lantern"].includes(item.name),
+  );
+  $: localLampOil = $localPc.gear.filter(
+    (item) => item.name === "Lamp Oil" && item.usageDie && item.usageDie !== "depleted",
+  );
+  $: selectedLightSource =
+    localLightSources.find((item) => item.id === selectedLightSourceId) ??
+    localLightSources[0];
+  $: selectedLampOil =
+    localLampOil.find((item) => item.id === selectedLampOilId) ??
+    localLampOil[0];
+  $: if (selectedLightSource && selectedLightSource.id !== selectedLightSourceId) {
+    selectedLightSourceId = selectedLightSource.id;
+  }
+  $: if (selectedLampOil && selectedLampOil.id !== selectedLampOilId) {
+    selectedLampOilId = selectedLampOil.id;
+  }
+  $: if (selectedLightSource?.name !== "Hooded Lantern" && selectedLightMode !== "open") {
+    selectedLightMode = "open";
+  }
+  $: explorationHour = Math.floor(($expedition.exploration.turn - 1) / 6) + 1;
+  $: explorationTurnInHour = (($expedition.exploration.turn - 1) % 6) + 1;
+  $: lightCheckpointDue =
+    explorationTurnInHour === 3 || explorationTurnInHour === 6;
+  $: dungeonEventDue =
+    $expedition.exploration.dungeonEventCheckedHour !== explorationHour;
+  $: localActiveLights = $expedition.exploration.activeLights.filter(
+    (light) => light.ownerId === $CurrentPlayerId && light.active,
+  );
   $: localLostAttributes = lostAttributes($localPc);
   let preparedDailyRequestId = "";
   $: if ($PendingExpeditionDailyStore && $PendingExpeditionDailyStore.requestId !== preparedDailyRequestId) {
@@ -404,6 +451,138 @@
     !localLostAttributes.includes(restAttributeChoice)
   ) {
     restAttributeChoice = localLostAttributes[0];
+  }
+
+  async function handleLightDeclaration(
+    declaration: ExplorationLightDeclaration,
+  ) {
+    if (!$isGM) return;
+    const lights = [...$expedition.exploration.activeLights];
+    const index = lights.findIndex(
+      (light) =>
+        light.ownerId === declaration.ownerId &&
+        light.sourceItemId === declaration.sourceItemId,
+    );
+
+    if (declaration.action === "extinguish") {
+      if (index >= 0) {
+        lights[index] = { ...lights[index], active: false };
+        await patchExploration({ activeLights: lights });
+      }
+      return;
+    }
+
+    const next: ExplorationActiveLight = {
+      ownerId: declaration.ownerId,
+      ownerName: declaration.ownerName,
+      sourceItemId: declaration.sourceItemId,
+      sourceName: declaration.sourceName,
+      fuelItemId: declaration.fuelItemId,
+      fuelName: declaration.fuelName,
+      fuelDie: declaration.fuelDie,
+      mode: declaration.mode,
+      reachFeet: declaration.reachFeet,
+      active: true,
+      lastCheckTurn: 0,
+    };
+    if (index >= 0) lights[index] = next;
+    else lights.push(next);
+    await patchExploration({ activeLights: lights });
+  }
+
+  $: if (
+    $isGM &&
+    $ExplorationLightDeclarationStore &&
+    $ExplorationLightDeclarationStore.nonce !== lastLightDeclarationNonce
+  ) {
+    lastLightDeclarationNonce = $ExplorationLightDeclarationStore.nonce;
+    void handleLightDeclaration($ExplorationLightDeclarationStore);
+  }
+
+  async function activateLocalLight() {
+    const source = selectedLightSource;
+    if (!source) return;
+
+    let fuel: GearItem | undefined;
+    if (source.name === "Torch Bundle") fuel = source;
+    else if (isLantern(source.name)) fuel = selectedLampOil;
+    if (!fuel?.usageDie || fuel.usageDie === "depleted") {
+      explorationMessage =
+        source.name === "Torch Bundle"
+          ? "No usable Torch Bundle stock."
+          : "A burning lantern needs an active Lamp Oil stock.";
+      return;
+    }
+
+    const mode: ExplorationLightMode =
+      source.name === "Hooded Lantern" ? selectedLightMode : "open";
+    await declareExplorationLight({
+      action: "upsert",
+      sourceItemId: source.id,
+      sourceName: source.name,
+      fuelItemId: fuel.id,
+      fuelName: fuel.name,
+      fuelDie: fuel.usageDie,
+      mode,
+      reachFeet: lightReach(source.name, mode),
+    });
+    explorationMessage = `${source.name} declared active.`;
+  }
+
+  async function extinguishLocalLight(light: ExplorationActiveLight) {
+    await declareExplorationLight({
+      action: "extinguish",
+      sourceItemId: light.sourceItemId,
+      sourceName: light.sourceName,
+      fuelItemId: light.fuelItemId,
+      fuelName: light.fuelName,
+      fuelDie: light.fuelDie,
+      mode: light.mode,
+      reachFeet: light.reachFeet,
+    });
+    explorationMessage = `${light.sourceName} extinguished.`;
+  }
+
+  async function markDungeonEventChecked() {
+    if (!$isGM) return;
+    await patchExploration({ dungeonEventCheckedHour: explorationHour });
+  }
+
+  async function completeExplorationTurn() {
+    if (!$isGM) return;
+    explorationMessage = "";
+    let lights = $expedition.exploration.activeLights.map((light) => ({ ...light }));
+
+    if (lightCheckpointDue) {
+      for (let index = 0; index < lights.length; index += 1) {
+        const light = lights[index];
+        if (!light.active) continue;
+        const response = await requestExplorationLightCheck(
+          light.ownerId,
+          light.sourceItemId,
+          light.fuelItemId,
+        );
+        if (!response) {
+          explorationMessage +=
+            `${light.ownerName}'s ${light.sourceName} did not answer its light Usage check. `;
+          continue;
+        }
+        lights[index] = {
+          ...light,
+          fuelDie: response.after,
+          active: !response.exhausted,
+          lastCheckTurn: $expedition.exploration.turn,
+        };
+        explorationMessage += response.exhausted
+          ? `${light.ownerName}'s ${light.sourceName} exhausted ${response.fuelName} and went out. `
+          : `${light.ownerName}'s ${light.sourceName}: ${response.before} rolled ${response.roll}, now ${response.after}. `;
+      }
+    }
+
+    await patchExploration({
+      turn: $expedition.exploration.turn + 1,
+      activeLights: lights,
+    });
   }
 
   async function setMode(mode: ExpeditionMode) {
@@ -3183,8 +3362,13 @@
     <div class="grid grid-cols-1 md:grid-cols-[2fr_1fr] gap-2 flex-1 min-h-0">
       <div class="exp-cell min-h-0 overflow-y-auto">
         <div class="flex items-center justify-between gap-2">
-          <h2>DUNGEON / LOCATION EXPLORATION</h2>
-          <span class="text-xs font-bold">Turn {$expedition.exploration.turn}</span>
+          <div>
+            <h2>DUNGEON / LOCATION EXPLORATION</h2>
+            <div class="text-[10px] text-gray-500">
+              Shared 10-minute Exploration Turn · Hour {explorationHour}, Turn {explorationTurnInHour} of 6
+            </div>
+          </div>
+          <span class="status-chip">Turn {$expedition.exploration.turn}</span>
         </div>
 
         <div class="grid grid-cols-2 gap-2 mt-2 text-xs">
@@ -3208,13 +3392,138 @@
           </label>
         </div>
 
-        <div class="mt-3 border rounded-md p-2 bg-gray-50">
-          <div class="font-bold text-xs">Shared Exploration Turn</div>
-          <div class="text-[10px] text-gray-500 mt-1">
-            Chapter 10 uses one shared Company turn of about 10 minutes. Activity assignment, pressure checkpoints,
-            formation, light and Dungeon Event handling come in the exploration pass.
+        <div class="mt-3 border-2 border-black rounded-md p-2 bg-white">
+          <div class="flex items-center justify-between gap-2">
+            <div>
+              <div class="font-bold text-xs">Light & Visibility</div>
+              <div class="text-[9px] text-gray-500">
+                Light follows its carrier. Walls, doors, corners, smoke, and actual position still determine what it illuminates.
+              </div>
+            </div>
+            <span class="status-chip">
+              {lightCheckpointDue ? "CHECKPOINT THIS TURN" : `NEXT CHECK ${explorationTurnInHour < 3 ? "TURN 3" : "TURN 6"}`}
+            </span>
+          </div>
+
+          {#if $expedition.exploration.activeLights.some((light) => light.active)}
+            <div class="flex flex-col gap-1 mt-2">
+              {#each $expedition.exploration.activeLights.filter((light) => light.active) as light (light.ownerId + ":" + light.sourceItemId)}
+                <div class="border rounded px-2 py-1 text-[10px] flex items-center gap-2 bg-gray-50">
+                  <span class="font-bold">{light.ownerName}</span>
+                  <span>{light.sourceName}</span>
+                  {#if light.sourceName === "Hooded Lantern"}
+                    <span class="text-gray-500">{light.mode}</span>
+                  {/if}
+                  <span class="ml-auto">{light.reachFeet} ft</span>
+                  <span class="font-bold">{light.fuelName} {light.fuelDie}</span>
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <div class="mt-2 border border-amber-400 bg-amber-50 rounded px-2 py-1 text-[10px] font-bold">
+              No active carried light is declared.
+            </div>
+          {/if}
+
+          <div class="mt-2 border-t pt-2">
+            <div class="font-bold text-[10px]">Your Carried Light</div>
+            {#if localLightSources.length}
+              <div class="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-1 items-end mt-1">
+                <label class="text-[10px]">
+                  Source
+                  <select class="w-full" bind:value={selectedLightSourceId}>
+                    {#each localLightSources as item (item.id)}
+                      <option value={item.id}>
+                        {item.name}{item.usageDie ? ` · ${item.usageDie}` : ""}
+                      </option>
+                    {/each}
+                  </select>
+                </label>
+                {#if selectedLightSource?.name === "Hooded Lantern"}
+                  <label class="text-[10px]">
+                    Hood
+                    <select bind:value={selectedLightMode}>
+                      <option value="open">Open · 30 ft</option>
+                      <option value="dimmed">Dimmed · 10 ft</option>
+                      <option value="closed">Closed · 0 ft</option>
+                    </select>
+                  </label>
+                {/if}
+                {#if selectedLightSource && isLantern(selectedLightSource.name)}
+                  <label class="text-[10px]">
+                    Lamp Oil
+                    <select bind:value={selectedLampOilId} disabled={!localLampOil.length}>
+                      {#if localLampOil.length}
+                        {#each localLampOil as oil (oil.id)}
+                          <option value={oil.id}>{oil.name} · {oil.usageDie}</option>
+                        {/each}
+                      {:else}
+                        <option value="">No Lamp Oil</option>
+                      {/if}
+                    </select>
+                  </label>
+                {/if}
+              </div>
+              <button
+                class="border rounded px-2 py-1 text-[10px] mt-1"
+                disabled={!!selectedLightSource && isLantern(selectedLightSource.name) && !localLampOil.length}
+                on:click={activateLocalLight}
+              >
+                Light / Update Source
+              </button>
+            {:else}
+              <div class="text-[10px] text-gray-400 mt-1">
+                No Torch Bundle or lantern is carried on this character.
+              </div>
+            {/if}
+
+            {#if localActiveLights.length}
+              <div class="flex flex-wrap gap-1 mt-1">
+                {#each localActiveLights as light (light.sourceItemId)}
+                  <button
+                    class="border rounded px-2 py-1 text-[10px]"
+                    on:click={() => extinguishLocalLight(light)}
+                  >
+                    Extinguish {light.sourceName}
+                  </button>
+                {/each}
+              </div>
+            {/if}
           </div>
         </div>
+
+        {#if $isGM}
+          <div class="mt-2 border rounded-md p-2 bg-slate-50 text-xs">
+            <div class="flex items-center justify-between gap-2">
+              <div>
+                <div class="font-bold">GM · Exploration Pressure</div>
+                <div class="text-[9px] text-gray-500">Dungeon Event state is private to the GM.</div>
+              </div>
+              <span class="status-chip">{dungeonEventDue ? "EVENT CHECK DUE" : "EVENT CHECKED"}</span>
+            </div>
+            {#if dungeonEventDue}
+              <div class="text-[10px] mt-1">
+                Start of exploration Hour {explorationHour}: make the secret Dungeon Event roll, then mark it checked.
+              </div>
+              <button class="border rounded px-2 py-1 text-[10px] mt-1" on:click={markDungeonEventChecked}>
+                Mark Dungeon Event Checked
+              </button>
+            {/if}
+            <div class="mt-2 text-[10px]">
+              Completing Turn {$expedition.exploration.turn}
+              {lightCheckpointDue
+                ? " will automatically roll each active carried light's Usage stock before the next Turn."
+                : " advances the shared clock by 10 minutes."}
+            </div>
+            <button class="primary-action mt-1" on:click={completeExplorationTurn}>
+              Complete Exploration Turn
+            </button>
+          </div>
+        {/if}
+
+        {#if explorationMessage}
+          <div class="mt-1 border rounded px-2 py-1 bg-amber-50 text-[10px]">{explorationMessage}</div>
+        {/if}
 
         <label class="text-xs mt-3 block">
           Company Notes
