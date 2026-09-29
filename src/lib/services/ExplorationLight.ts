@@ -56,7 +56,9 @@ function id(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 
-function activeUsage(item: GearItem | undefined): item is GearItem {
+function activeUsage(
+  item: GearItem | undefined,
+): item is GearItem & { usageDie: Exclude<UsageDieState, "depleted"> } {
   return !!item?.usageDie && item.usageDie !== "depleted";
 }
 
