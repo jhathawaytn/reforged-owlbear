@@ -1,0 +1,13 @@
+{
+  "name": "Reforged Sheet",
+  "version": "0.1.17",
+  "icon": "https://jhathawaytn.github.io/reforged-owlbear/icon.svg",
+  "manifest_version": 1,
+  "action": {
+    "title": "Reforged Sheet",
+    "icon": "https://jhathawaytn.github.io/reforged-owlbear/icon.svg",
+    "popover": "https://jhathawaytn.github.io/reforged-owlbear/app.html?build=027",
+    "height": 780,
+    "width": 1060
+  }
+}
