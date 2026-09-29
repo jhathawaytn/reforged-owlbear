@@ -12,6 +12,7 @@ import { initExpeditionStore } from "../model/ExpeditionStore";
 import { initExpeditionRolls } from "./ExpeditionRolls";
 import { initExpeditionDaily } from "./ExpeditionDaily";
 import { initExplorationLight } from "./ExplorationLight";
+import { initExplorationActivities } from "./ExplorationActivities";
 
 const PLUGIN_ID = "rodeo.owlbear.reforged-sheet";
 
@@ -71,6 +72,7 @@ export async function init() {
     initExpeditionRolls();
     initExpeditionDaily();
     initExplorationLight();
+    initExplorationActivities();
     await initExpeditionStore();
 
     if (get(isGM)) {
