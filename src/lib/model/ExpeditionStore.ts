@@ -121,6 +121,13 @@ export type ExplorationActiveLight = {
   burnTurns: number;
 };
 
+export type ExplorationFormationRow = {
+  leftId: string;
+  rightId: string;
+};
+
+export type ExplorationMovementMode = "New / Unsecured" | "Explored" | "Rush";
+
 export type ExplorationExpeditionState = {
   turn: number;
   siteName: string;
@@ -128,6 +135,8 @@ export type ExplorationExpeditionState = {
   notes: string;
   activeLights: ExplorationActiveLight[];
   dungeonEventCheckedHour: number;
+  formationRows: ExplorationFormationRow[];
+  movementMode: ExplorationMovementMode;
 };
 
 export type ExpeditionState = {
@@ -196,6 +205,8 @@ export const defaultExpeditionState = (): ExpeditionState => ({
     notes: "",
     activeLights: [],
     dungeonEventCheckedHour: 0,
+    formationRows: [],
+    movementMode: "New / Unsecured",
   },
 });
 
