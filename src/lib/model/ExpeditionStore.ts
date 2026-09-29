@@ -56,16 +56,6 @@ export type ExpeditionAssignment = {
   role?: WildernessRole;
 };
 
-export type CompanySupplyKind = "Trail Rations" | "Fresh Rations" | "Water";
-export type CompanySupplyDie = "d6" | "d4" | "depleted";
-
-export type CompanySupplyStock = {
-  id: string;
-  kind: CompanySupplyKind;
-  usageDie: CompanySupplyDie;
-  label: string;
-};
-
 export type WildernessExpeditionState = {
   day: number;
   quarter: TravelQuarter;
@@ -88,7 +78,6 @@ export type WildernessExpeditionState = {
   travelQuartersToday: number;
   forcedMarchStoppedPlayerIds: string[];
   companyNpcs: CompanyNpc[];
-  companySupplies: CompanySupplyStock[];
   makeCampLeaderId: string;
   quartermasterTodayId: string;
   quartermasterCoveredTravelQuarters: number;
@@ -156,7 +145,6 @@ export const defaultExpeditionState = (): ExpeditionState => ({
     travelQuartersToday: 0,
     forcedMarchStoppedPlayerIds: [],
     companyNpcs: [],
-    companySupplies: [],
     makeCampLeaderId: "",
     quartermasterTodayId: "",
     quartermasterCoveredTravelQuarters: 0,
