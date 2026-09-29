@@ -666,8 +666,37 @@
     );
   }
 
+  async function setDungeonCampEstablished(established: boolean) {
+    if (!$isGM) return;
+    await patchExploration({
+      dungeonCampEstablished: established,
+      dungeonCampNaturalRoll: 0,
+      dungeonCampModifiedRoll: 0,
+      dungeonCampResult: "",
+      dungeonCampResultHour: 0,
+    });
+  }
+
+  async function toggleDungeonCampWatcher(memberId: string) {
+    if (!$isGM) return;
+    const current = $expedition.exploration.dungeonCampWatchIds;
+    const next = current.includes(memberId)
+      ? current.filter((id) => id !== memberId)
+      : [...current, memberId];
+    await patchExploration({ dungeonCampWatchIds: next });
+  }
+
+  async function setDungeonCampPrepNotes(notes: string) {
+    if (!$isGM) return;
+    await patchExploration({ dungeonCampPrepNotes: notes });
+  }
+
   async function rollDungeonCamp() {
     if (!$isGM) return;
+    if (!$expedition.exploration.dungeonCampEstablished) {
+      explorationMessage = "Establish the dungeon camp before rolling.";
+      return;
+    }
     const [natural] = await rollDiceValues(1, 20, {
       rollTarget: "gm_only",
       showResults: true,
@@ -733,6 +762,9 @@
     await patchExploration({
       turn: nextTurn,
       activityAssignments: [],
+      dungeonCampEstablished: false,
+      dungeonCampWatchIds: [],
+      dungeonCampPrepNotes: "",
       dungeonCampMeal: "None",
       dungeonCampNaturalRoll: 0,
       dungeonCampModifiedRoll: 0,
@@ -817,6 +849,9 @@
         formationRows: [],
         movementMode: "New / Unsecured",
         activityAssignments: [],
+        dungeonCampEstablished: false,
+        dungeonCampWatchIds: [],
+        dungeonCampPrepNotes: "",
         dungeonCampMeal: "None",
         dungeonCampNaturalRoll: 0,
         dungeonCampModifiedRoll: 0,
@@ -3870,23 +3905,75 @@
               <span class="status-chip">6 HOURS · 36 TURNS</span>
             </div>
 
-            <div class="flex flex-wrap items-end gap-2 mt-2">
-              <label class="text-[10px]">
-                Shared Meal
-                <select
-                  value={$expedition.exploration.dungeonCampMeal}
-                  on:change={onDungeonCampMealChange}
-                >
-                  {#each DUNGEON_CAMP_MEALS as meal}
-                    <option value={meal}>
-                      {meal === "None" ? "None / ordinary food (+0)" : meal === "Simple" ? "Simple Meal (−1)" : "Fancy Meal (−2)"}
-                    </option>
+            <div class="mt-2 border rounded-md p-2 bg-gray-50">
+              <div class="flex items-center gap-2">
+                <label class="flex items-center gap-1 text-[10px] font-bold">
+                  <input
+                    type="checkbox"
+                    checked={$expedition.exploration.dungeonCampEstablished}
+                    on:change={(event) => setDungeonCampEstablished(event.currentTarget.checked)}
+                  />
+                  Camp established
+                </label>
+                <span class="text-[9px] text-gray-500">
+                  Record the actual preparations that matter; they do not add a numeric camp modifier.
+                </span>
+              </div>
+
+              <div class="mt-2">
+                <div class="font-bold text-[10px]">Watchers</div>
+                <div class="text-[9px] text-gray-500">
+                  Mark anyone assigned to watch during the Sleep Quarter. Watches matter fictionally if something manifests.
+                </div>
+                <div class="flex flex-wrap gap-1 mt-1">
+                  {#each company as member (member.id)}
+                    <label class="border rounded px-2 py-1 bg-white text-[10px] flex items-center gap-1">
+                      <input
+                        type="checkbox"
+                        checked={$expedition.exploration.dungeonCampWatchIds.includes(member.id)}
+                        on:change={() => toggleDungeonCampWatcher(member.id)}
+                      />
+                      {member.name}
+                    </label>
                   {/each}
-                </select>
+                </div>
+              </div>
+
+              <label class="text-[10px] block mt-2">
+                Camp Preparations
+                <input
+                  class="w-full"
+                  value={$expedition.exploration.dungeonCampPrepNotes}
+                  placeholder="Barricades, alarms, shelter, dry bedding, concealed light, fire discipline, sleeping positions..."
+                  on:change={(event) => setDungeonCampPrepNotes(event.currentTarget.value)}
+                />
               </label>
-              <button class="border rounded px-2 py-1 text-[10px]" on:click={rollDungeonCamp}>
-                Roll Secret Dungeon Camp
-              </button>
+
+              <div class="flex flex-wrap items-end gap-2 mt-2">
+                <label class="text-[10px]">
+                  Shared Meal
+                  <select
+                    value={$expedition.exploration.dungeonCampMeal}
+                    on:change={onDungeonCampMealChange}
+                  >
+                    {#each DUNGEON_CAMP_MEALS as meal}
+                      <option value={meal}>
+                        {meal === "None" ? "None / ordinary food (+0)" : meal === "Simple" ? "Simple Meal (−1)" : "Fancy Meal (−2)"}
+                      </option>
+                    {/each}
+                  </select>
+                </label>
+                <button
+                  class="border rounded px-2 py-1 text-[10px]"
+                  disabled={!$expedition.exploration.dungeonCampEstablished}
+                  on:click={rollDungeonCamp}
+                >
+                  Roll Secret Dungeon Camp
+                </button>
+              </div>
+              <div class="text-[9px] text-gray-500 mt-1">
+                Meal tier only applies as a Company-wide modifier if all sleepers able to eat actually received that tier.
+              </div>
             </div>
 
             {#if $expedition.exploration.dungeonCampResult}

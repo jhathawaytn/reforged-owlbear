@@ -158,6 +158,9 @@ export type ExplorationExpeditionState = {
   formationRows: ExplorationFormationRow[];
   movementMode: ExplorationMovementMode;
   activityAssignments: ExplorationActivityAssignment[];
+  dungeonCampEstablished: boolean;
+  dungeonCampWatchIds: string[];
+  dungeonCampPrepNotes: string;
   dungeonCampMeal: DungeonCampMeal;
   dungeonCampNaturalRoll: number;
   dungeonCampModifiedRoll: number;
@@ -234,6 +237,9 @@ export const defaultExpeditionState = (): ExpeditionState => ({
     formationRows: [],
     movementMode: "New / Unsecured",
     activityAssignments: [],
+    dungeonCampEstablished: false,
+    dungeonCampWatchIds: [],
+    dungeonCampPrepNotes: "",
     dungeonCampMeal: "None",
     dungeonCampNaturalRoll: 0,
     dungeonCampModifiedRoll: 0,
