@@ -853,36 +853,16 @@
 
     const npc = member.npc;
     if (!npc) return false;
-    if (role === "Trailblazer") {
-      return npc.kind === "Guide Hireling" || npc.kind === "Scout Henchman" || npc.kind === "Apprentice";
-    }
-    if (role === "Keep Watch") {
-      return npc.kind === "Scout Henchman" || npc.kind === "Apprentice";
-    }
+    if (role === "Trailblazer" || role === "Keep Watch") return true;
     return npc.kind === "Professional Quartermaster" || npc.quartermasterQualified;
   }
 
   function standWatchEligible(member: CompanyMember): boolean {
-    if (member.source === "player") return true;
-    const npc = member.npc;
-    if (!npc) return false;
-    return (
-      npc.kind === "Scout Henchman" ||
-      npc.kind === "Apprentice" ||
-      (npc.kind === "Other" && npc.detectionRank > 0)
-    );
+    return member.source === "player" || !!member.npc;
   }
 
   function makeCampLeadEligible(member: CompanyMember): boolean {
-    if (member.source === "player") return true;
-    const npc = member.npc;
-    if (!npc) return false;
-    return (
-      npc.kind === "Camp Hand Hireling" ||
-      npc.kind === "Scout Henchman" ||
-      npc.kind === "Apprentice" ||
-      npc.wildernessCraftRank > 0
-    );
+    return member.source === "player" || !!member.npc;
   }
 
   function npcPracticedExpertise(npc: CompanyNpc, kind: ExpeditionRollKind): boolean {
@@ -1014,12 +994,6 @@
     const current = assignmentFor(playerId);
     const member = memberForId(playerId);
     let role = current.role;
-
-    if (activity === "Stand Watch" && member && !standWatchEligible(member)) {
-      (e.currentTarget as HTMLSelectElement).value = current.activity;
-      quarterMessage = `${member.name} is not eligible to Stand Watch with their current NPC Job/Type.`;
-      return;
-    }
 
     // Travel Roles are retained as the character's carried-forward preference,
     // but only become active while that character's Activity is Travel.
@@ -3019,12 +2993,7 @@
                   Activity
                   <select disabled={!$isGM} value={assignment.activity} on:change={(e) => onActivityChange(p.id, e)}>
                     {#each ACTIVITIES as activity}
-                      <option
-                        value={activity}
-                        disabled={activity === "Stand Watch" && !standWatchEligible(p)}
-                      >
-                        {activity}
-                      </option>
+                      <option value={activity}>{activity}</option>
                     {/each}
                   </select>
                 </label>
