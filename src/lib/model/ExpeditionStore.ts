@@ -106,11 +106,27 @@ export type WildernessExpeditionState = {
   assignments: ExpeditionAssignment[];
 };
 
+export type ExplorationActiveLight = {
+  ownerId: string;
+  ownerName: string;
+  sourceItemId: string;
+  sourceName: string;
+  fuelItemId: string;
+  fuelName: string;
+  fuelDie: "d4" | "d6" | "d8" | "d10" | "d12" | "depleted";
+  mode: "open" | "dimmed" | "closed";
+  reachFeet: number;
+  active: boolean;
+  lastCheckTurn: number;
+};
+
 export type ExplorationExpeditionState = {
   turn: number;
   siteName: string;
   siteArea: string;
   notes: string;
+  activeLights: ExplorationActiveLight[];
+  dungeonEventCheckedHour: number;
 };
 
 export type ExpeditionState = {
@@ -177,6 +193,8 @@ export const defaultExpeditionState = (): ExpeditionState => ({
     siteName: "",
     siteArea: "",
     notes: "",
+    activeLights: [],
+    dungeonEventCheckedHour: 0,
   },
 });
 
