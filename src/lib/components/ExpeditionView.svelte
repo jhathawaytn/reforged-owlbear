@@ -406,12 +406,6 @@
   $: selectedLampOil =
     localLampOil.find((item) => item.id === selectedLampOilId) ??
     localLampOil[0];
-  $: if (selectedLightSource && selectedLightSource.id !== selectedLightSourceId) {
-    selectedLightSourceId = selectedLightSource.id;
-  }
-  $: if (selectedLampOil && selectedLampOil.id !== selectedLampOilId) {
-    selectedLampOilId = selectedLampOil.id;
-  }
   $: if (selectedLightSource?.name !== "Hooded Lantern" && selectedLightMode !== "open") {
     selectedLightMode = "open";
   }
