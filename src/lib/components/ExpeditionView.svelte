@@ -3522,26 +3522,24 @@
                     <span class="text-gray-500">{light.mode}</span>
                   {/if}
                   <span class="ml-auto">{light.reachFeet} ft</span>
-                  {@const burnTurns = light.burnTurns ?? 0}
-                  {@const turnsUntilCheck = 3 - (burnTurns % 3)}
                   <span
-                    class:font-bold={turnsUntilCheck === 1}
-                    class:text-amber-700={turnsUntilCheck === 1}
+                    class:font-bold={3 - ((light.burnTurns ?? 0) % 3) === 1}
+                    class:text-amber-700={3 - ((light.burnTurns ?? 0) % 3) === 1}
                   >
-                    {turnsUntilCheck === 1
+                    {3 - ((light.burnTurns ?? 0) % 3) === 1
                       ? "FUEL CHECK THIS TURN"
-                      : `Fuel check in ${turnsUntilCheck} Turns`}
+                      : `Fuel check in ${3 - ((light.burnTurns ?? 0) % 3)} Turns`}
                   </span>
                   {#if light.sourceName === "Torch Bundle"}
-                    <span class:font-bold={burnTurns >= 4} class:text-amber-700={burnTurns >= 4}>
-                      {burnTurns >= 5
+                    <span class:font-bold={(light.burnTurns ?? 0) >= 4} class:text-amber-700={(light.burnTurns ?? 0) >= 4}>
+                      {(light.burnTurns ?? 0) >= 5
                         ? "FINAL TURN"
-                        : burnTurns >= 4
+                        : (light.burnTurns ?? 0) >= 4
                           ? "BURNING LOW"
-                          : `Torch Turn ${burnTurns + 1}/6`}
+                          : `Torch Turn ${(light.burnTurns ?? 0) + 1}/6`}
                     </span>
                   {:else}
-                    <span>{burnTurns} burn Turns</span>
+                    <span>{light.burnTurns ?? 0} burn Turns</span>
                   {/if}
                   <span class="font-bold">{light.fuelName} {light.fuelDie}</span>
                 </div>
