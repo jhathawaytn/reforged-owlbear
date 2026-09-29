@@ -1119,38 +1119,48 @@
     }
   }
 
-  async function resolveNpcSleep(member: CompanyMember, quality: RestQuality) {
-    const npc = member.npc;
-    if (!npc) return;
+  async function promptRestForSleepers(qualityOverride?: RestQuality) {
+    if (!$isGM || !sleeperEntries.length) return;
+    const quality =
+      qualityOverride ??
+      (restQualityReady ? ($expedition.wilderness.campRestQuality as RestQuality) : undefined);
+    if (!quality) return;
 
-    const nextNpc: CompanyNpc = {
-      ...npc,
-      fatigue: quality === "Perilous" ? npc.fatigue : 0,
-      deprivedFromRest: false,
-    };
+    // Resolve every sleeping NPC in one room-state write. Sequential writes
+    // could race through OBR metadata and leave one sleeper falsely unresolved.
+    const unresolvedNpcSleepers = sleeperEntries
+      .map(({ member }) => member)
+      .filter(
+        (member) =>
+          member.source === "npc" &&
+          member.npc &&
+          !$expedition.wilderness.sleptPlayerIdsToday.includes(member.id),
+      );
 
-    await patchWilderness({
-      companyNpcs: $expedition.wilderness.companyNpcs.map((entry) =>
-        entry.id === npc.id ? nextNpc : entry,
-      ),
-      sleptPlayerIdsToday: [
-        ...new Set([...$expedition.wilderness.sleptPlayerIdsToday, npc.id]),
-      ],
-    });
-  }
-
-  async function promptRestForSleepers() {
-    if (!$isGM || !sleeperEntries.length || !restQualityReady) return;
-    const quality = $expedition.wilderness.campRestQuality as RestQuality;
+    if (unresolvedNpcSleepers.length) {
+      const npcIds = new Set(unresolvedNpcSleepers.map((member) => member.id));
+      await patchWilderness({
+        companyNpcs: $expedition.wilderness.companyNpcs.map((npc) =>
+          npcIds.has(npc.id)
+            ? {
+                ...npc,
+                fatigue: quality === "Perilous" ? npc.fatigue : 0,
+                deprivedFromRest: false,
+              }
+            : npc,
+        ),
+        sleptPlayerIdsToday: [
+          ...new Set([
+            ...$expedition.wilderness.sleptPlayerIdsToday,
+            ...unresolvedNpcSleepers.map((member) => member.id),
+          ]),
+        ],
+      });
+    }
 
     for (const { member } of sleeperEntries) {
+      if (member.source !== "player") continue;
       if ($expedition.wilderness.sleptPlayerIdsToday.includes(member.id)) continue;
-
-      if (member.source === "npc") {
-        await resolveNpcSleep(member, quality);
-        continue;
-      }
-
       if (pendingRestIds.has(member.id)) continue;
       pendingRestIds.add(member.id);
 
@@ -1253,11 +1263,11 @@
       return;
     }
 
-    if (sleeperEntries.length && !restQualityReady) {
+    if (sleeperEntries.length && !restQualityReady && makeCampEntries.length === 0) {
       quarterPlanActive = false;
       quarterTasks = [];
       quarterMessage =
-        "Sleep resolves Rest, but no Rest quality is established for today. Complete Make Camp first, or set the shelter's Rest quality below.";
+        "Sleep resolves Rest, but no Rest quality is established for today. Include Make Camp in this Quarter, complete Make Camp first, or set the shelter's Rest quality below.";
       return;
     }
 
@@ -1479,7 +1489,7 @@
       void promptDailyConsumption();
     }
 
-    if (sleeperEntries.length) {
+    if (sleeperEntries.length && (restQualityReady || makeCampEntries.length === 0)) {
       void promptRestForSleepers();
     }
   }
@@ -1603,6 +1613,17 @@
 
     if (watch) {
       watchMessage = response.outcome ?? "";
+    }
+
+    if (response.kind === "Make Camp" && response.roll) {
+      const quality: RestQuality = response.roll.success ? "Normal" : "Perilous";
+      await patchWilderness({
+        campRestQuality: quality,
+        campRestQualityDay: $expedition.wilderness.day,
+      });
+      if (sleeperEntries.length) {
+        await promptRestForSleepers(quality);
+      }
     }
 
     if (response.kind === "Forced March") {
@@ -1863,6 +1884,13 @@
           </div>
         </div>
 
+        <div class="mt-2 text-[10px] border rounded px-2 py-1 bg-gray-50 flex items-center gap-2">
+          <span class="font-bold">Journey</span>
+          <span>{$expedition.wilderness.currentLocation || "Origin not set"}</span>
+          <i class="material-icons text-xs text-gray-500">arrow_forward</i>
+          <span>{$expedition.wilderness.destination || "Destination not set"}</span>
+        </div>
+
         <div class="grid grid-cols-2 md:grid-cols-4 gap-1 mt-2 text-[10px]">
           <div class="status-box">
             <div class="status-label">Climate</div>
@@ -2040,6 +2068,9 @@
               {#if $isGM}
                 <button class="primary-action mt-2" on:click={beginQuarterResolution}>Confirm Quarter & Resolve</button>
               {/if}
+              {#if quarterMessage}
+                <div class="mt-1 text-[10px] border rounded px-2 py-1 bg-amber-50">{quarterMessage}</div>
+              {/if}
             </div>
           {:else if workflowStep === "resolve"}
             <div class="mt-2 text-xs">
@@ -2180,6 +2211,7 @@
           </div>
         {/if}
 
+        {#if $isGM}
         <details class="mt-2 border rounded-md bg-gray-50">
           <summary class="px-2 py-1 text-xs font-bold cursor-pointer">Journey Setup & GM Tools</summary>
           <div class="p-2 pt-1 text-xs">
@@ -2284,6 +2316,7 @@
             {/if}
           </div>
         </details>
+        {/if}
 
         <div class="mt-3">
           <div class="flex items-center justify-between text-xs mb-1">
