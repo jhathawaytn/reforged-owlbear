@@ -140,6 +140,7 @@
   let npcKind: CompanyNpcKind = "Guide Hireling";
   let npcLevel = 1;
   let npcNotes = "";
+  let eventConspicuous = false;
 
   $: {
     const merged = new Map<string, CompanyMember>();
@@ -313,6 +314,37 @@
   $: arrivalCanBeRecorded =
     $expedition.wilderness.destination.trim().length > 0 &&
     ($expedition.wilderness.routeMode === "Unmapped Country" || knownRouteComplete);
+  $: unmappedEventDue =
+    $expedition.wilderness.routeMode === "Unmapped Country" &&
+    $expedition.wilderness.wildernessEventCheckedDay !== $expedition.wilderness.day;
+  $: knownRouteBaseEventRange =
+    $expedition.wilderness.routeTimeQuarters <= 0
+      ? { min: 0, max: 0 }
+      : $expedition.wilderness.routeTimeQuarters <= 2
+        ? { min: 0, max: 1 }
+        : $expedition.wilderness.routeTimeQuarters <= 7
+          ? { min: 1, max: 2 }
+          : { min: 2, max: 3 };
+  $: knownRouteEventMin = Math.max(
+    0,
+    knownRouteBaseEventRange.min +
+      ($expedition.wilderness.knownRouteDangerous ? 1 : 0) -
+      ($expedition.wilderness.knownRouteCautiousCommitment ? 1 : 0),
+  );
+  $: knownRouteEventMax = Math.max(
+    0,
+    knownRouteBaseEventRange.max +
+      ($expedition.wilderness.knownRouteDangerous ? 1 : 0) -
+      ($expedition.wilderness.knownRouteCautiousCommitment ? 1 : 0),
+  );
+  $: knownRouteEventsRemaining =
+    $expedition.wilderness.knownRouteEventBudget < 0
+      ? 0
+      : Math.max(
+          0,
+          $expedition.wilderness.knownRouteEventBudget -
+            $expedition.wilderness.knownRouteEventsResolved,
+        );
   $: workflowStep = (
     !climateReady
       ? "climate"
@@ -598,6 +630,31 @@
     return { quarter: QUARTERS[idx + 1], newDay: false };
   }
 
+  function defaultActivityForQuarter(q: TravelQuarter): WildernessActivity | null {
+    if (q === "Morning" || q === "Day") return "Travel";
+    if (q === "Evening") return "Sleep";
+    return null;
+  }
+
+  function assignmentsForQuarter(q: TravelQuarter): ExpeditionAssignment[] {
+    const activity = defaultActivityForQuarter(q);
+    if (!activity) return $expedition.wilderness.assignments;
+
+    return company.map((member) => {
+      const current = assignmentFor(member.id);
+      return { ...current, playerId: member.id, activity };
+    });
+  }
+
+  function resetKnownRouteEventState() {
+    return {
+      knownRouteEventBudget: -1,
+      knownRouteEventsResolved: 0,
+      knownRouteDangerous: false,
+      knownRouteCautiousCommitment: false,
+    };
+  }
+
   function onRouteChange(e: Event) {
     clearQuarterPlan();
     patchWilderness({
@@ -607,6 +664,7 @@
       paceDeclaredDay: 0,
       weather: "Not rolled",
       weatherExtremeCandidate: "",
+      ...resetKnownRouteEventState(),
     });
   }
 
@@ -619,6 +677,78 @@
       paceDeclaredDay: 0,
       weather: "Not rolled",
       weatherExtremeCandidate: "",
+    });
+  }
+
+  function onDestinationChange(e: Event) {
+    clearQuarterPlan();
+    const destination = (e.currentTarget as HTMLInputElement).value;
+    const startingNewLeg =
+      !$expedition.wilderness.destination.trim() &&
+      destination.trim().length > 0 &&
+      $expedition.wilderness.progress === 0;
+    patchWilderness({
+      destination,
+      ...(startingNewLeg ? resetKnownRouteEventState() : {}),
+    });
+  }
+
+  function onRouteTimeChange(e: Event) {
+    clearQuarterPlan();
+    patchWilderness({
+      routeTimeQuarters: parseInt((e.currentTarget as HTMLInputElement).value, 10) || 0,
+      ...resetKnownRouteEventState(),
+    });
+  }
+
+  async function checkUnmappedWildernessEvent(markExternal = false) {
+    if (!$isGM || $expedition.wilderness.routeMode !== "Unmapped Country") return;
+    const dieSides = eventConspicuous ? 4 : $expedition.wilderness.pace === "Cautious" ? 8 : 6;
+    const roll = markExternal ? 0 : (await rollDiceValues(1, dieSides, { rollTarget: "gm_only", showResults: true }))[0];
+
+    await patchWilderness({
+      wildernessEventCheckedDay: $expedition.wilderness.day,
+      wildernessEventLastDie: markExternal ? 0 : dieSides,
+      wildernessEventLastRoll: roll,
+      wildernessEventOccurred: markExternal ? false : roll === 1,
+    });
+  }
+
+  async function setKnownRouteEventBudget(value: number) {
+    if (!$isGM || $expedition.wilderness.routeMode !== "Known Route") return;
+    const budget = Number.isFinite(value) ? Math.max(0, Math.min(99, value)) : -1;
+    await patchWilderness({
+      knownRouteEventBudget: budget,
+      knownRouteEventsResolved: Math.min($expedition.wilderness.knownRouteEventsResolved, budget),
+    });
+  }
+
+  async function resolveKnownRouteEvent() {
+    if (
+      !$isGM ||
+      $expedition.wilderness.knownRouteEventBudget < 0 ||
+      knownRouteEventsRemaining <= 0
+    ) return;
+    await patchWilderness({
+      knownRouteEventsResolved: $expedition.wilderness.knownRouteEventsResolved + 1,
+    });
+  }
+
+  async function setKnownRouteDangerous(value: boolean) {
+    if (!$isGM) return;
+    await patchWilderness({
+      knownRouteDangerous: value,
+      knownRouteEventBudget: -1,
+      knownRouteEventsResolved: 0,
+    });
+  }
+
+  async function setKnownRouteCautiousCommitment(value: boolean) {
+    if (!$isGM) return;
+    await patchWilderness({
+      knownRouteCautiousCommitment: value,
+      knownRouteEventBudget: -1,
+      knownRouteEventsResolved: 0,
     });
   }
 
@@ -968,6 +1098,11 @@
       progress: 0,
       routeTimeQuarters: 0,
       routeConfirmedDay: 0,
+      wildernessEventCheckedDay: 0,
+      wildernessEventLastDie: 0,
+      wildernessEventLastRoll: 0,
+      wildernessEventOccurred: false,
+      ...resetKnownRouteEventState(),
       assignments: [],
       makeCampLeaderId: "",
     });
@@ -1012,6 +1147,10 @@
       weatherModifiedRoll: 0,
       weatherRolledDay: 0,
       weatherExtremeCandidate: "",
+      wildernessEventCheckedDay: 0,
+      wildernessEventLastDie: 0,
+      wildernessEventLastRoll: 0,
+      wildernessEventOccurred: false,
       travelQuartersToday: 0,
       forcedMarchStoppedPlayerIds: [],
       quartermasterTodayId: "",
@@ -1756,6 +1895,12 @@
       });
     }
 
+    const nextAssignments = assignmentsForQuarter(next.quarter);
+    const nextMakeCampLeaderId =
+      defaultActivityForQuarter(next.quarter) === null
+        ? $expedition.wilderness.makeCampLeaderId
+        : "";
+
     await patchWilderness({
       progress,
       quarter: next.quarter,
@@ -1776,6 +1921,8 @@
       forcedMarchAttemptsByPlayer: next.daysAdvanced ? {} : $expedition.wilderness.forcedMarchAttemptsByPlayer,
       forcedMarchAttemptKeys: next.daysAdvanced ? [] : $expedition.wilderness.forcedMarchAttemptKeys,
       sleptPlayerIdsToday: next.daysAdvanced ? [] : $expedition.wilderness.sleptPlayerIdsToday,
+      assignments: nextAssignments,
+      makeCampLeaderId: nextMakeCampLeaderId,
       companyNpcs,
     });
 
@@ -2212,6 +2359,108 @@
         {/if}
 
         {#if $isGM}
+          <div class="mt-2 border-2 border-slate-400 rounded-md bg-slate-50 p-2 text-xs">
+            <div class="flex items-center justify-between gap-2">
+              <div>
+                <div class="font-bold">GM · Wilderness Events</div>
+                <div class="text-[9px] text-gray-500">Private referee procedure. Players do not see this panel or its rolls.</div>
+              </div>
+              {#if $expedition.wilderness.routeMode === "Unmapped Country"}
+                <span class="status-chip">{unmappedEventDue ? "CHECK DUE" : "CHECKED"}</span>
+              {:else if $expedition.wilderness.knownRouteEventBudget < 0}
+                <span class="status-chip">SET BUDGET</span>
+              {:else}
+                <span class="status-chip">{knownRouteEventsRemaining} REMAIN</span>
+              {/if}
+            </div>
+
+            {#if $expedition.wilderness.routeMode === "Unmapped Country"}
+              <div class="mt-2">
+                <div class="text-[10px]">
+                  One Wilderness Event check per travel day, placed in an appropriate Quarter — not one check per Quarter.
+                </div>
+                {#if unmappedEventDue}
+                  <label class="flex items-center gap-1 mt-1 text-[10px]">
+                    <input type="checkbox" bind:checked={eventConspicuous} />
+                    Company is loud, lit, bleeding, or leaving an obvious trail
+                  </label>
+                  <div class="flex flex-wrap gap-1 mt-1">
+                    <button class="bg-black text-white rounded px-2 py-1 text-[10px]" on:click={() => checkUnmappedWildernessEvent(false)}>
+                      Roll 1-in-{eventConspicuous ? 4 : $expedition.wilderness.pace === "Cautious" ? 8 : 6}
+                    </button>
+                    <button class="border rounded px-2 py-1 text-[10px]" on:click={() => checkUnmappedWildernessEvent(true)}>
+                      Mark Checked Externally
+                    </button>
+                  </div>
+                {:else}
+                  <div class="mt-1 text-[10px]">
+                    {#if $expedition.wilderness.wildernessEventLastRoll > 0}
+                      Day {$expedition.wilderness.day}: d{$expedition.wilderness.wildernessEventLastDie}
+                      → {$expedition.wilderness.wildernessEventLastRoll}.
+                      {$expedition.wilderness.wildernessEventOccurred ? "Event occurs." : "No event."}
+                    {:else}
+                      Day {$expedition.wilderness.day}: marked checked externally.
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+            {:else}
+              <div class="mt-2">
+                {#if $expedition.wilderness.routeTimeQuarters <= 0}
+                  <div class="text-[10px]">Enter the recorded route time to determine the whole-journey Event budget range.</div>
+                {:else}
+                  <div class="text-[10px]">
+                    Whole-journey budget guideline: <span class="font-bold">{knownRouteEventMin}–{knownRouteEventMax}</span>
+                    event{knownRouteEventMax === 1 ? "" : "s"} for {$expedition.wilderness.routeTimeQuarters} recorded Quarter{$expedition.wilderness.routeTimeQuarters === 1 ? "" : "s"}.
+                  </div>
+                  <div class="flex flex-wrap gap-3 mt-1 text-[10px]">
+                    <label class="flex items-center gap-1">
+                      <input
+                        type="checkbox"
+                        checked={$expedition.wilderness.knownRouteDangerous}
+                        on:change={(e) => setKnownRouteDangerous(e.currentTarget.checked)}
+                      />
+                      Contested / dangerous / long untraveled (+1)
+                    </label>
+                    <label class="flex items-center gap-1">
+                      <input
+                        type="checkbox"
+                        checked={$expedition.wilderness.knownRouteCautiousCommitment}
+                        on:change={(e) => setKnownRouteCautiousCommitment(e.currentTarget.checked)}
+                      />
+                      Cautious for whole journey (−1, min 0)
+                    </label>
+                  </div>
+                  <div class="flex items-end gap-2 mt-2">
+                    <label>
+                      Event Budget
+                      <input
+                        class="w-20"
+                        type="number"
+                        min="0"
+                        value={$expedition.wilderness.knownRouteEventBudget < 0 ? "" : $expedition.wilderness.knownRouteEventBudget}
+                        placeholder={`${knownRouteEventMin}–${knownRouteEventMax}`}
+                        on:change={(e) => setKnownRouteEventBudget(parseInt(e.currentTarget.value, 10))}
+                      />
+                    </label>
+                    {#if $expedition.wilderness.knownRouteEventBudget >= 0}
+                      <div class="text-[10px] pb-1">
+                        {$expedition.wilderness.knownRouteEventsResolved} resolved · {knownRouteEventsRemaining} remaining
+                      </div>
+                      <button
+                        class="border rounded px-2 py-1 text-[10px] mb-0.5"
+                        disabled={knownRouteEventsRemaining <= 0}
+                        on:click={resolveKnownRouteEvent}
+                      >
+                        Mark One Event Resolved
+                      </button>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+            {/if}
+          </div>
+
         <details class="mt-2 border rounded-md bg-gray-50">
           <summary class="px-2 py-1 text-xs font-bold cursor-pointer">Journey Setup & GM Tools</summary>
           <div class="p-2 pt-1 text-xs">
@@ -2253,7 +2502,7 @@
                 value={$expedition.wilderness.destination}
                 placeholder="Destination"
                 aria-label="Journey destination"
-                on:change={(e) => patchWilderness({ destination: e.currentTarget.value })}
+                on:change={onDestinationChange}
               />
             </div>
 
@@ -2266,7 +2515,7 @@
                     min="0"
                     disabled={!$isGM}
                     value={$expedition.wilderness.routeTimeQuarters}
-                    on:change={(e) => patchWilderness({ routeTimeQuarters: parseInt(e.currentTarget.value) || 0 })}
+                    on:change={onRouteTimeChange}
                   />
                   <span class="text-[10px] text-gray-500">Quarters</span>
                 </div>
@@ -2728,7 +2977,7 @@
 
         <h2>QUARTER PLAN</h2>
         <div class="text-[10px] text-gray-500 mb-1">
-          Day 1 Morning establishes the starting plan. Activities and Roles carry forward until you change or reset them.
+          Common Activities prefill by Quarter: Morning/Day Travel, Evening Sleep, Night carries the current plan. Roles stay assigned until you change them.
         </div>
         <div class="text-[9px] text-gray-400 mb-2">
           Owlbear party: {$PartyStore.filter((p) => p.role === "PLAYER").length}

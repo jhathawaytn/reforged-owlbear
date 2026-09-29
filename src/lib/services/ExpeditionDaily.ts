@@ -206,31 +206,65 @@ export async function resolvePendingConsumption(
   const usage: UsageResolution[] = [];
 
   let foodSatisfied = !request.ordinaryRequired;
-  if (request.ordinaryRequired) {
-    if (choice.rationSource === "shared") {
-      foodSatisfied = true;
-    } else if (choice.rationSource !== "none") {
-      const item = pc.gear.find((gear) => gear.id === choice.rationSource);
-      if (activeUsageItem(item, "Rations")) {
-        usage.push(await rollUsage(item, request.ordinaryThreshold, "Food", true));
-        foodSatisfied = true;
-      }
-    }
-
-    if (foodSatisfied) pc = clearDeprivationCause(pc, "Food");
-  }
-
   const totalWaterRolls = (request.ordinaryRequired ? 1 : 0) + Math.max(0, request.extraWaterRolls);
   let waterSatisfied = totalWaterRolls === 0;
   const extraWaterRollsResolved = request.extraWaterRolls;
 
-  if (choice.waterSource === "shared") {
-    waterSatisfied = true;
-  } else if (choice.waterSource !== "none") {
-    let preferredId = choice.waterSource;
-    let allWaterSupplied = true;
+  const rationItem =
+    request.ordinaryRequired && choice.rationSource !== "none" && choice.rationSource !== "shared"
+      ? pc.gear.find((gear) => gear.id === choice.rationSource)
+      : undefined;
+  let ordinaryWaterItem =
+    request.ordinaryRequired && choice.waterSource !== "none" && choice.waterSource !== "shared"
+      ? pc.gear.find((gear) => gear.id === choice.waterSource)
+      : undefined;
+  if (
+    request.ordinaryRequired &&
+    choice.waterSource !== "none" &&
+    choice.waterSource !== "shared" &&
+    !activeUsageItem(ordinaryWaterItem, "Water")
+  ) {
+    ordinaryWaterItem = pc.gear.find((gear) => activeUsageItem(gear, "Water"));
+  }
 
-    for (let index = 0; index < totalWaterRolls; index += 1) {
+  // Ordinary Food and Water are independent stocks, so launch their visible
+  // Usage rolls together. Extra Water remains sequential because the active
+  // stock may step down or deplete between rolls.
+  const ordinaryRolls: Promise<UsageResolution>[] = [];
+  let foodRollIndex = -1;
+  let waterRollIndex = -1;
+
+  if (request.ordinaryRequired) {
+    if (choice.rationSource === "shared") {
+      foodSatisfied = true;
+    } else if (activeUsageItem(rationItem, "Rations")) {
+      foodRollIndex = ordinaryRolls.length;
+      ordinaryRolls.push(rollUsage(rationItem, request.ordinaryThreshold, "Food", true));
+      foodSatisfied = true;
+    }
+
+    if (choice.waterSource === "shared") {
+      waterSatisfied = true;
+    } else if (activeUsageItem(ordinaryWaterItem, "Water")) {
+      waterRollIndex = ordinaryRolls.length;
+      ordinaryRolls.push(rollUsage(ordinaryWaterItem, request.ordinaryThreshold, "Water", true));
+      waterSatisfied = true;
+    }
+  } else if (choice.waterSource === "shared") {
+    waterSatisfied = true;
+  }
+
+  const ordinaryResults = await Promise.all(ordinaryRolls);
+  if (foodRollIndex >= 0) usage.push(ordinaryResults[foodRollIndex]);
+  if (waterRollIndex >= 0) usage.push(ordinaryResults[waterRollIndex]);
+
+  if (request.ordinaryRequired && foodSatisfied) pc = clearDeprivationCause(pc, "Food");
+
+  if (choice.waterSource !== "shared" && choice.waterSource !== "none") {
+    let preferredId = choice.waterSource;
+    let allWaterSupplied = request.ordinaryRequired ? waterSatisfied : true;
+
+    for (let index = 0; index < Math.max(0, request.extraWaterRolls); index += 1) {
       let item = pc.gear.find((gear) => gear.id === preferredId);
       if (!activeUsageItem(item, "Water")) {
         item = pc.gear.find((gear) => activeUsageItem(gear, "Water"));
@@ -240,19 +274,13 @@ export async function resolvePendingConsumption(
         break;
       }
 
-      const ordinary = index === 0;
-      usage.push(
-        await rollUsage(
-          item,
-          ordinary ? request.ordinaryThreshold : 3,
-          "Water",
-          ordinary,
-        ),
-      );
+      usage.push(await rollUsage(item, 3, "Water", false));
       preferredId = item.id;
     }
 
     waterSatisfied = allWaterSupplied;
+  } else if (choice.waterSource === "none" && totalWaterRolls > 0) {
+    waterSatisfied = false;
   }
 
   if (waterSatisfied) {
