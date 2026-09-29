@@ -95,6 +95,14 @@ export type WildernessExpeditionState = {
   destination: string;
   progress: number;
   routeTimeQuarters: number;
+  wildernessEventCheckedDay: number;
+  wildernessEventLastDie: number;
+  wildernessEventLastRoll: number;
+  wildernessEventOccurred: boolean;
+  knownRouteEventBudget: number;
+  knownRouteEventsResolved: number;
+  knownRouteDangerous: boolean;
+  knownRouteCautiousCommitment: boolean;
   assignments: ExpeditionAssignment[];
 };
 
@@ -154,6 +162,14 @@ export const defaultExpeditionState = (): ExpeditionState => ({
     destination: "",
     progress: 0,
     routeTimeQuarters: 0,
+    wildernessEventCheckedDay: 0,
+    wildernessEventLastDie: 0,
+    wildernessEventLastRoll: 0,
+    wildernessEventOccurred: false,
+    knownRouteEventBudget: -1,
+    knownRouteEventsResolved: 0,
+    knownRouteDangerous: false,
+    knownRouteCautiousCommitment: false,
     assignments: [],
   },
   exploration: {
