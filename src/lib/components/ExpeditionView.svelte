@@ -3497,15 +3497,40 @@
   {:else}
     <div class="grid grid-cols-1 md:grid-cols-[2fr_1fr] gap-2 flex-1 min-h-0">
       <div class="exp-cell min-h-0 overflow-y-auto">
-        <div class="flex items-center justify-between gap-2">
-          <div>
-            <h2>DUNGEON / LOCATION EXPLORATION</h2>
-            <div class="text-[10px] text-gray-500">
-              Shared 10-minute Exploration Turn · Hour {explorationHour}, Turn {explorationTurnInHour} of 6
+        {#if $isGM}
+          <div class="flex items-center justify-between gap-2">
+            <div>
+              <h2>DUNGEON / LOCATION EXPLORATION</h2>
+              <div class="text-[10px] text-gray-500">
+                Shared 10-minute Exploration Turn · Hour {explorationHour}, Turn {explorationTurnInHour} of 6
+              </div>
+            </div>
+            <span class="status-chip">Turn {$expedition.exploration.turn}</span>
+          </div>
+        {:else}
+          <div class="border-2 border-black rounded-lg p-3 bg-white">
+            <div class="flex items-center justify-between gap-2">
+              <h2>DUNGEON / LOCATION EXPLORATION</h2>
+              <span class="text-[9px] text-gray-500">Each Turn ≈ 10 min</span>
+            </div>
+            <div class="grid grid-cols-3 gap-2 mt-2 text-center">
+              <div class="border rounded-md py-2 bg-gray-50">
+                <div class="text-[9px] uppercase tracking-wide text-gray-500">Hour</div>
+                <div class="text-3xl font-black leading-none">{explorationHour}</div>
+              </div>
+              <div class="border rounded-md py-2 bg-gray-50">
+                <div class="text-[9px] uppercase tracking-wide text-gray-500">Turn This Hour</div>
+                <div class="text-3xl font-black leading-none">
+                  {explorationTurnInHour}<span class="text-sm font-bold text-gray-500"> / 6</span>
+                </div>
+              </div>
+              <div class="border rounded-md py-2 bg-gray-50">
+                <div class="text-[9px] uppercase tracking-wide text-gray-500">Total Turn</div>
+                <div class="text-3xl font-black leading-none">{$expedition.exploration.turn}</div>
+              </div>
             </div>
           </div>
-          <span class="status-chip">Turn {$expedition.exploration.turn}</span>
-        </div>
+        {/if}
 
         <div class="grid grid-cols-2 gap-2 mt-2 text-xs">
           <label>
