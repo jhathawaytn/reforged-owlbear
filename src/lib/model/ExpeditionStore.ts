@@ -145,6 +145,9 @@ export type ExplorationActivityAssignment = {
   detail: string;
 };
 
+export type DungeonCampMeal = "None" | "Simple" | "Fancy";
+export type DungeonCampResult = "" | "Quiet Night" | "Rough Night" | "Camp Disaster";
+
 export type ExplorationExpeditionState = {
   turn: number;
   siteName: string;
@@ -155,6 +158,11 @@ export type ExplorationExpeditionState = {
   formationRows: ExplorationFormationRow[];
   movementMode: ExplorationMovementMode;
   activityAssignments: ExplorationActivityAssignment[];
+  dungeonCampMeal: DungeonCampMeal;
+  dungeonCampNaturalRoll: number;
+  dungeonCampModifiedRoll: number;
+  dungeonCampResult: DungeonCampResult;
+  dungeonCampResultHour: number;
 };
 
 export type ExpeditionState = {
@@ -226,6 +234,11 @@ export const defaultExpeditionState = (): ExpeditionState => ({
     formationRows: [],
     movementMode: "New / Unsecured",
     activityAssignments: [],
+    dungeonCampMeal: "None",
+    dungeonCampNaturalRoll: 0,
+    dungeonCampModifiedRoll: 0,
+    dungeonCampResult: "",
+    dungeonCampResultHour: 0,
   },
 });
 
