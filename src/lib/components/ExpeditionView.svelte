@@ -599,6 +599,12 @@
     await patchExploration({ movementMode: mode });
   }
 
+  function onExplorationMovementChange(event: Event) {
+    void setExplorationMovement(
+      (event.currentTarget as HTMLSelectElement).value as ExplorationMovementMode,
+    );
+  }
+
   async function markDungeonEventChecked() {
     if (!$isGM) return;
     await patchExploration({ dungeonEventCheckedHour: explorationHour });
@@ -3479,7 +3485,7 @@
               <select
                 disabled={!$isGM}
                 value={$expedition.exploration.movementMode}
-                on:change={(e) => setExplorationMovement(e.currentTarget.value as ExplorationMovementMode)}
+                on:change={onExplorationMovementChange}
               >
                 {#each EXPLORATION_MOVEMENT as mode}
                   <option value={mode}>{mode}</option>
