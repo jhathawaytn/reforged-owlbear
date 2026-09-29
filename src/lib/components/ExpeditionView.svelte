@@ -809,9 +809,19 @@
       mode: "wilderness",
       exploration: {
         ...$expedition.exploration,
+        turn: 1,
+        siteName: "",
         siteArea: "",
         activeLights: [],
+        dungeonEventCheckedHour: 0,
+        formationRows: [],
+        movementMode: "New / Unsecured",
         activityAssignments: [],
+        dungeonCampMeal: "None",
+        dungeonCampNaturalRoll: 0,
+        dungeonCampModifiedRoll: 0,
+        dungeonCampResult: "",
+        dungeonCampResultHour: 0,
       },
     });
   }
