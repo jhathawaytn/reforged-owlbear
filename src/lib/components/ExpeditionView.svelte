@@ -2772,7 +2772,6 @@
                     {#each localRationItems as item (item.id)}
                       <option value={item.id}>{item.name} · {item.usageDie}</option>
                     {/each}
-                    <option value="shared">Company/shared supply — tracked manually</option>
                     <option value="none">No ration available</option>
                   </select>
                 </label>
@@ -2785,7 +2784,6 @@
                     {#each localWaterItems as item (item.id)}
                       <option value={item.id}>{item.name} · {item.usageDie}</option>
                     {/each}
-                    <option value="shared">Company/shared supply — tracked manually</option>
                     <option value="none">No accessible Water</option>
                   </select>
                 </label>
