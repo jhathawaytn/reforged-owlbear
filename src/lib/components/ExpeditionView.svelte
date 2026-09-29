@@ -24,6 +24,9 @@
     type WildernessRole,
     type CompanyNpc,
     type CompanyNpcKind,
+    type CompanySupplyStock,
+    type CompanySupplyKind,
+    type CompanySupplyDie,
     type RestQuality,
   } from "../model/ExpeditionStore";
   import {
@@ -39,7 +42,7 @@
     expeditionRollMode,
     resolveExpeditionOutcome,
   } from "../services/ExpeditionRolls";
-  import { rollDiceValues, rollReforgedSave } from "../services/DicePlus";
+  import { rollDiceValues, rollReforgedSave, rollSingleDie } from "../services/DicePlus";
   import { PlayerCharacterStore as localPc } from "../model/ReforgedCharacter";
   import type { Attribute } from "../types";
   import { lostAttributes } from "../services/RestRecovery";
@@ -49,8 +52,10 @@
     requestExpeditionDaily,
     resolvePendingConsumption,
     resolvePendingRest,
+    confirmCompanyConsumptionResult,
     applyDayCloseout,
     type ExpeditionDailyResponse,
+    type UsageResolution,
   } from "../services/ExpeditionDaily";
   import { newId } from "../utils";
 
@@ -141,6 +146,9 @@
   let npcLevel = 1;
   let npcNotes = "";
   let eventConspicuous = false;
+  let newSupplyKind: CompanySupplyKind = "Trail Rations";
+  let newSupplyLabel = "";
+  let companySupplyQueue: Promise<void> = Promise.resolve();
 
   $: {
     const merged = new Map<string, CompanyMember>();
@@ -371,6 +379,14 @@
     workflowStep === "plan" ? 6 :
     workflowStep === "resolve" ? 7 : 8;
 
+  $: companyRationStocks = $expedition.wilderness.companySupplies.filter(
+    (stock) =>
+      (stock.kind === "Trail Rations" || stock.kind === "Fresh Rations") &&
+      stock.usageDie !== "depleted",
+  );
+  $: companyWaterStocks = $expedition.wilderness.companySupplies.filter(
+    (stock) => stock.kind === "Water" && stock.usageDie !== "depleted",
+  );
   $: localRationItems = $localPc.gear.filter(
     (item) => item.usageKind === "Rations" && item.usageDie && item.usageDie !== "depleted",
   );
@@ -384,11 +400,13 @@
     dailyBusy = false;
     if ($PendingExpeditionDailyStore.kind === "Consumption") {
       rationChoice = $PendingExpeditionDailyStore.ordinaryRequired
-        ? localRationItems[0]?.id ?? "none"
+        ? localRationItems[0]?.id ??
+          ($PendingExpeditionDailyStore.companyRationsAvailable ? "shared" : "none")
         : "none";
       waterChoice =
         ($PendingExpeditionDailyStore.ordinaryRequired || $PendingExpeditionDailyStore.extraWaterRolls > 0)
-          ? localWaterItems[0]?.id ?? "none"
+          ? localWaterItems[0]?.id ??
+            ($PendingExpeditionDailyStore.companyWaterAvailable ? "shared" : "none")
           : "none";
     } else if (
       $PendingExpeditionDailyStore.quality === "Comfortable" &&
@@ -1162,11 +1180,153 @@
     );
   }
 
+  async function rollCompanySupplyStock(
+    stock: CompanySupplyStock,
+    threshold: 2 | 3,
+    category: "Food" | "Water",
+    ordinary: boolean,
+  ): Promise<UsageResolution> {
+    const before = stock.usageDie;
+    if (before === "depleted") {
+      throw new Error("Cannot roll a depleted Company supply stock.");
+    }
+    const roll = await rollSingleDie(before === "d6" ? 6 : 4, {
+      rollTarget: "everyone",
+      showResults: true,
+    });
+    const after: CompanySupplyDie =
+      roll <= threshold ? (before === "d6" ? "d4" : "depleted") : before;
+    stock.usageDie = after;
+    return {
+      itemName: stock.label || stock.kind,
+      before,
+      roll,
+      threshold,
+      after,
+      suppliedUse: true,
+      category,
+      ordinary,
+      companyStockId: stock.id,
+    };
+  }
+
+  async function resolveCompanyConsumption(
+    response: ExpeditionDailyResponse,
+    ordinaryRequired: boolean,
+    ordinaryThreshold: 2 | 3,
+  ): Promise<ExpeditionDailyResponse> {
+    if (!response.companyRationsRequested && !response.companyWaterRequested) {
+      return response;
+    }
+
+    const supplies = $expedition.wilderness.companySupplies.map((stock) => ({ ...stock }));
+    const sharedUsage: UsageResolution[] = [];
+    let foodSatisfied = response.foodSatisfied ?? !ordinaryRequired;
+    let waterSatisfied = response.waterSatisfied ?? false;
+
+    const foodWork = async () => {
+      if (!response.companyRationsRequested || !ordinaryRequired) return;
+      const stock = supplies.find(
+        (entry) =>
+          (entry.kind === "Trail Rations" || entry.kind === "Fresh Rations") &&
+          entry.usageDie !== "depleted",
+      );
+      if (!stock) {
+        foodSatisfied = false;
+        return;
+      }
+      sharedUsage.push(
+        await rollCompanySupplyStock(stock, ordinaryThreshold, "Food", true),
+      );
+      foodSatisfied = true;
+    };
+
+    const waterWork = async () => {
+      if (!response.companyWaterRequested) return;
+      const totalRolls =
+        (ordinaryRequired ? 1 : 0) + Math.max(0, response.extraWaterRollsResolved ?? 0);
+      let suppliedAll = true;
+      for (let index = 0; index < totalRolls; index += 1) {
+        const stock = supplies.find(
+          (entry) => entry.kind === "Water" && entry.usageDie !== "depleted",
+        );
+        if (!stock) {
+          suppliedAll = false;
+          break;
+        }
+        const ordinary = ordinaryRequired && index === 0;
+        sharedUsage.push(
+          await rollCompanySupplyStock(
+            stock,
+            ordinary ? ordinaryThreshold : 3,
+            "Water",
+            ordinary,
+          ),
+        );
+      }
+      waterSatisfied = suppliedAll;
+    };
+
+    await Promise.all([foodWork(), waterWork()]);
+    await patchWilderness({ companySupplies: supplies });
+
+    const finalResponse: ExpeditionDailyResponse = {
+      ...response,
+      foodSatisfied,
+      waterSatisfied,
+      usage: [...(response.usage ?? []), ...sharedUsage],
+    };
+    confirmCompanyConsumptionResult(finalResponse);
+    return finalResponse;
+  }
+
+  async function addCompanySupply() {
+    if (!$isGM) return;
+    const stock: CompanySupplyStock = {
+      id: `supply:${newId()}`,
+      kind: newSupplyKind,
+      usageDie: "d6",
+      label: newSupplyLabel.trim() || newSupplyKind,
+    };
+    await patchWilderness({
+      companySupplies: [...$expedition.wilderness.companySupplies, stock],
+    });
+    newSupplyLabel = "";
+  }
+
+  async function patchCompanySupply(
+    id: string,
+    patch: Partial<CompanySupplyStock>,
+  ) {
+    if (!$isGM) return;
+    await patchWilderness({
+      companySupplies: $expedition.wilderness.companySupplies.map((stock) =>
+        stock.id === id ? { ...stock, ...patch } : stock,
+      ),
+    });
+  }
+
+  async function removeCompanySupply(id: string) {
+    if (!$isGM) return;
+    await patchWilderness({
+      companySupplies: $expedition.wilderness.companySupplies.filter(
+        (stock) => stock.id !== id,
+      ),
+    });
+  }
+
   async function recordConsumptionResponse(
     response: ExpeditionDailyResponse,
     ordinaryRequired: boolean,
+    ordinaryThreshold: 2 | 3,
   ) {
     if (response.status !== "resolved") return;
+
+    response = await resolveCompanyConsumption(
+      response,
+      ordinaryRequired,
+      ordinaryThreshold,
+    );
 
     const id = response.targetPlayerId;
     const consumptionResolvedPlayerIds = ordinaryRequired
@@ -1218,6 +1378,8 @@
         ordinaryThreshold: threshold,
         ordinaryRequired,
         extraWaterRolls,
+        companyRationsAvailable: companyRationStocks.length > 0,
+        companyWaterAvailable: companyWaterStocks.length > 0,
         note:
           (ordinaryRequired
             ? `Daily ration + Water Usage; ordinary depletion threshold 1–${threshold}.`
@@ -1226,8 +1388,13 @@
             ? ` ${extraWaterRolls} additional Water Usage roll${extraWaterRolls === 1 ? "" : "s"} owed from Heat/Forced March; these deplete on 1–3.`
             : ""),
       })
-        .then(async (response) => {
-          if (response) await recordConsumptionResponse(response, ordinaryRequired);
+        .then((response) => {
+          if (!response) return;
+          companySupplyQueue = companySupplyQueue
+            .then(() => recordConsumptionResponse(response, ordinaryRequired, threshold))
+            .catch((error) => {
+              console.error("Company supply resolution failed", error);
+            });
         })
         .finally(() => pendingConsumptionIds.delete(member.id));
     }
@@ -2772,7 +2939,9 @@
                     {#each localRationItems as item (item.id)}
                       <option value={item.id}>{item.name} · {item.usageDie}</option>
                     {/each}
-                    <option value="shared">Company/shared supply — tracked manually</option>
+                    {#if $PendingExpeditionDailyStore.companyRationsAvailable}
+                      <option value="shared">Company Rations — tracked shared stock</option>
+                    {/if}
                     <option value="none">No ration available</option>
                   </select>
                 </label>
@@ -2785,7 +2954,9 @@
                     {#each localWaterItems as item (item.id)}
                       <option value={item.id}>{item.name} · {item.usageDie}</option>
                     {/each}
-                    <option value="shared">Company/shared supply — tracked manually</option>
+                    {#if $PendingExpeditionDailyStore.companyWaterAvailable}
+                      <option value="shared">Company Water — tracked shared stock</option>
+                    {/if}
                     <option value="none">No accessible Water</option>
                   </select>
                 </label>
@@ -3131,6 +3302,77 @@
         {:else}
           <div class="text-xs text-gray-400">No Company members currently available.</div>
         {/if}
+
+        <div class="border-t mt-3 pt-2">
+          <div class="flex items-center justify-between gap-2">
+            <div>
+              <div class="font-bold text-xs">Company Supplies</div>
+              <div class="text-[9px] text-gray-500">
+                Individual shared stocks. Each eater/drink rolls the active stock sequentially; depleted stocks remain visible until removed.
+              </div>
+            </div>
+            <span class="text-[9px] text-gray-500">
+              {companyRationStocks.length} food · {companyWaterStocks.length} water active
+            </span>
+          </div>
+
+          {#if $expedition.wilderness.companySupplies.length}
+            <div class="flex flex-col gap-1 mt-2">
+              {#each $expedition.wilderness.companySupplies as stock (stock.id)}
+                <div class="border rounded px-2 py-1 text-[10px] bg-white flex items-center gap-2">
+                  <span class="font-bold truncate">{stock.label || stock.kind}</span>
+                  <span class="text-gray-500">{stock.kind}</span>
+                  {#if $isGM}
+                    <select
+                      class="ml-auto text-[10px] w-24"
+                      value={stock.usageDie}
+                      on:change={(e) =>
+                        patchCompanySupply(stock.id, {
+                          usageDie: e.currentTarget.value as CompanySupplyDie,
+                        })}
+                    >
+                      <option value="d6">d6</option>
+                      <option value="d4">d4</option>
+                      <option value="depleted">depleted</option>
+                    </select>
+                    <button
+                      class="border rounded px-1"
+                      title="Remove Company supply stock"
+                      on:click={() => removeCompanySupply(stock.id)}
+                    >
+                      ×
+                    </button>
+                  {:else}
+                    <span class="ml-auto font-bold">{stock.usageDie}</span>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <div class="text-[10px] text-gray-400 mt-1">No shared Company supply stocks recorded.</div>
+          {/if}
+
+          {#if $isGM}
+            <div class="grid grid-cols-[1fr_1fr_auto] gap-1 mt-2">
+              <select class="text-xs" bind:value={newSupplyKind}>
+                <option value="Trail Rations">Trail Rations</option>
+                <option value="Fresh Rations">Fresh Rations</option>
+                <option value="Water">Water</option>
+              </select>
+              <input
+                class="text-xs"
+                bind:value={newSupplyLabel}
+                placeholder="Optional label"
+              />
+              <button class="border rounded px-2 py-1 text-xs" on:click={addCompanySupply}>
+                Add d6
+              </button>
+            </div>
+            <div class="text-[9px] text-gray-500 mt-1">
+              Fresh Rations are temporary field stocks and should be discarded when the Company enters a settlement.
+            </div>
+          {/if}
+        </div>
 
         {#if $isGM}
           <div class="border-t mt-3 pt-2">
