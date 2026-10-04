@@ -149,7 +149,13 @@ export function initExpeditionDaily(): void {
 }
 
 export async function requestExpeditionDaily(
-  input: Omit<ExpeditionDailyRequest, "requestId" | "requestedBy">,
+  // Distributive Omit: plain Omit on a union keeps only the keys shared by
+  // every member, which rejected both the Consumption and Rest shapes.
+  input: ExpeditionDailyRequest extends infer R
+    ? R extends ExpeditionDailyRequest
+      ? Omit<R, "requestId" | "requestedBy">
+      : never
+    : never,
   timeoutMs = 180000,
 ): Promise<ExpeditionDailyResponse | null> {
   const requestId = id();

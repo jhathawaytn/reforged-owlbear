@@ -41,6 +41,17 @@ step). `vite.config.ts`'s `base: "./"` and the manifest's/`Notifier.ts`'s relati
 exist specifically so this works under a Pages project subpath instead of a domain root -
 don't reintroduce a leading `/` in those paths.
 
+**Owlbear caches extension iframes hard.** The Sep 27-28 work added three layers to make
+players actually get a new build:
+- The manifest's `popover` points at `app.html?build=NNN`. Bump `NNN` on each user-visible
+  release (`028` at 0.1.18).
+- `public/loader.html` + `dist/app-assets.json` (the deploy workflow writes it after the build)
+  let a stable loader page pick up the newest hashed assets without leaving the Owlbear iframe.
+- Versioned manifests (`public/manifest-v016.json`, `manifest-v017.json`, ...) give testers a
+  brand-new URL to add when Owlbear still clings to an old manifest. On each release, make
+  `manifest.json` and **every** `manifest-v0NN.json` identical (testers may have added any of
+  those URLs), and add a new `manifest-v0NN.json` for the new version.
+
 ## Stack & architecture
 
 Svelte 3 + TypeScript + Tailwind + Vite. Two entry points: `index.html` (sheet) and
@@ -69,10 +80,65 @@ Svelte 3 + TypeScript + Tailwind + Vite. Two entry points: `index.html` (sheet) 
 | `src/lib/components/gear/GearShopButton.svelte` | Searchable Gear shop modal |
 | `src/lib/components/HPView.svelte` | HP, Catch Your Breath, Rest |
 | `src/lib/components/SkillsTalents*.svelte` | Manage picker + on-sheet summary |
+| `src/lib/model/ExpeditionStore.ts` | Shared Company Expedition state (wilderness + exploration), stored in **room** metadata; GM writes, everyone reads |
+| `src/lib/components/ExpeditionView.svelte` | The Expedition board UI (~4,200 lines): Wilderness Travel, Quarter Plan, Dungeon/Location Exploration, Marching Formation, Company roster |
+| `src/lib/services/ExpeditionRolls.ts` | GM asks a player's client to roll a travel check (Trailblaze, Keep Watch, Forage...) with that PC's Skill Rank; result comes back by broadcast |
+| `src/lib/services/ExpeditionDaily.ts` | Daily Food/Water consumption and Rest requests; each player's client applies the result to its own sheet |
+| `src/lib/services/ExplorationLight.ts` | Light sources, reach, fuel Usage Die checks per Exploration Turn |
+| `src/lib/services/ExplorationActivities.ts` | Per-character exploration activity declarations (Focused Search, Listening, Watch...) |
+| `src/lib/services/RestRecovery.ts` | Rest resolution shared by the sheet and the Expedition board |
+| `src/lib/services/DicePlus.ts` | Routes rolls through the Dice+ extension when it's present (falls back otherwise) |
 
-`README.md` has the full "modeled accurately / simplified / next steps" record.
+`README.md` has the full "modeled accurately / simplified / next steps" record up to Sep 26.
+It does **not** cover the Expedition board yet.
 
-## Current task
+## Status (updated Oct 3, 2026)
+
+Sep 26 evening through Sep 28 shipped 73 commits that were never written up here. This is the
+summary, reconstructed from the git history and the code.
+
+**Sheet fixes (Sep 26):** Gear grouped by inventory zone, zone capacities corrected to Ch.9;
+stale Owlbear metadata no longer reverts sheet edits or overwrites the GM's view; gear zone
+changes persist atomically; rolls go through Dice+.
+
+**Company Expedition board** (new header button, `ExpeditionButton.svelte`). A GM-run,
+Company-level panel. State lives in room metadata (`rodeo.owlbear.reforged-sheet/expedition`),
+so every client sees the same board. Players' own sheets are changed only by their own client,
+in response to a broadcast request from the GM (same trust model as the HP nudge).
+
+- **Wilderness Travel (Sep 27 → Batches 1-5):** guided "dawn to dawn" Travel Phase. Journey
+  setup locks Climate; Dawn rolls Weather (with carry-over modifier, Cold Snap/Heat Wave) and
+  declares one Pace for the day (Cautious/Steady/Forced, forced march attempts); Known Route
+  vs. Unmapped Country, terrain, journey progress and route time; role assignment board
+  (Trailblazer, Keep Watch, Quartermaster) plus Quarter activities (Forage, Hunt, Fish, Make
+  Camp, Stand Watch, Sleep); Company NPCs (hirelings, henchmen, apprentices) who can take
+  roles; private wilderness event checks; Arrival and the next leg; daily Food/Water
+  consumption; Rest quality and closeout; real Company supply stocks (the abstract supply
+  inventory was removed).
+- **Dungeon / Location Exploration (Sep 28 → Batches 6A-6E):** Exploration Turn clock with
+  light sources and fuel (partial fuel, torch duration, per-source check clocks); marching
+  formation and movement mode (New/Unsecured, Explored, Rush); per-character exploration
+  activities (GM-optional tracking); GM "exit location" control that resets exploration
+  state; dungeon camp, sleep quarter, camp preparation, meals and watches, with a
+  Quiet Night / Rough Night / Camp Disaster result.
+
+Current version: **0.1.18** (popover `build=028`).
+
+**0.1.18 (Oct 3): checks green again.** `svelte-check` 0 errors, `npm test` 80/80, build clean.
+- **Real bug fixed:** the sleepers' "Prompt Again" button passed its click event as the Rest
+  quality (`promptRestForSleepers(MouseEvent)`), so the re-sent Rest request was garbage.
+  Now `on:click={() => promptRestForSleepers()}`.
+- Type-only fixes, no behavior change: `requestExpeditionDaily`'s input is now a
+  distributive Omit (plain `Omit` on the request union rejected both shapes);
+  `addDeprivationCause`'s conditions typed; `ExplorationLight.ts` fuel-die writes past the
+  `activeUsage` narrowing; NPC attribute loop uses `ATTRIBUTES`.
+- `compendium.test.ts` now stubs `@owlbear-rodeo/sdk` with `vi.mock` (the SDK reads `window`
+  at import time, pulled in via `compendium.ts → DicePlus.ts`). Any new test that imports a
+  module touching the SDK needs the same stub.
+
+**Next batch: unknown.** No plan file for Batch 7+ is in the repo. Ask Jason.
+
+## Shipped before Sep 26 (history)
 
 **Overburdened's HP effect (Appendix A) is now real.** "Your HP is immediately reduced to 0"
 was previously just tooltip text - the HP box now actually shows 0 (red, input disabled)
@@ -243,10 +309,8 @@ OVERBURDENED" stays visible on the main sheet via the Conditions box header.
 
 ## Backlog (after the current task)
 
-1. **Travel panel** — separate, GM-run, Company-level (Ch.11): Day/Quarter tracker, Pace,
-   Known Route vs. Unmapped, Weather + carry-over modifier, roles (Trailblazer, Watch,
-   Quartermaster) and Quarter Activities, daily ration/water checklist, event log.
-   It can't write to players' sheets yet, so prompt players to roll their own Usage Dice.
+1. **Jason's virtual-playtest report and update recommendations** (incoming Oct 3): triage
+   them first. *(The old item 1, the Travel panel, shipped as the Expedition board, Sep 27-28.)*
 2. **`TESTING.md`'s remaining acceptance work** — Playwright against a mocked OBR SDK (GM +
    Player contexts side by side), the manual Owlbear checklist, the click-budget table, and
    the rules-ambiguities list for Jason. The Vitest half is done (`npm test`).

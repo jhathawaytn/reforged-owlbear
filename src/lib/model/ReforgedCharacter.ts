@@ -86,7 +86,7 @@ export function addDeprivationCause(pc: ReforgedCharacter, cause: string): Refor
   const causes = pc.deprivationCauses.includes(cause)
     ? pc.deprivationCauses
     : [...pc.deprivationCauses, cause];
-  const conditions = pc.conditions.includes("Deprived")
+  const conditions: ReforgedCharacter["conditions"] = pc.conditions.includes("Deprived")
     ? pc.conditions
     : [...pc.conditions, "Deprived"];
   return { ...pc, deprivationCauses: causes, conditions };

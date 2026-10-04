@@ -107,7 +107,7 @@ export function initExplorationLight(): void {
         showResults: true,
       });
       after = roll <= 3 ? stepDownDie(fuel.usageDie) : fuel.usageDie;
-      fuel.usageDie = after;
+      (fuel as GearItem).usageDie = after;
       PlayerCharacterStore.set(pc);
     }
 
@@ -138,11 +138,12 @@ export async function declareExplorationLight(
     pc = { ...pc, gear: pc.gear.map((item) => ({ ...item })) };
     const fuel = pc.gear.find((item) => item.id === input.fuelItemId);
     if (activeUsage(fuel)) {
-      fuel.usageDie = stepDownDie(fuel.usageDie);
+      const nextDie = stepDownDie(fuel.usageDie);
+      (fuel as GearItem).usageDie = nextDie;
       PlayerCharacterStore.set(pc);
       nextInput = {
         ...input,
-        fuelDie: fuel.usageDie,
+        fuelDie: nextDie,
       };
     }
   }

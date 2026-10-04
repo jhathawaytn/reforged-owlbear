@@ -49,6 +49,7 @@
   import { rollDiceValues, rollReforgedSave } from "../services/DicePlus";
   import { PlayerCharacterStore as localPc } from "../model/ReforgedCharacter";
   import type { Attribute, GearItem } from "../types";
+  import { ATTRIBUTES } from "../types";
   import { lostAttributes } from "../services/RestRecovery";
   import {
     PendingExpeditionDailyStore,
@@ -2704,7 +2705,7 @@
                       {$expedition.wilderness.sleptPlayerIdsToday.filter((id) => sleeperEntries.some(({ member }) => member.id === id)).length}/{sleeperEntries.length}
                     </span>
                     {#if $isGM && restQualityReady && !sleepersResolved}
-                      <button class="border rounded px-2 py-0.5 bg-white" on:click={promptRestForSleepers}>Prompt Again</button>
+                      <button class="border rounded px-2 py-0.5 bg-white" on:click={() => promptRestForSleepers()}>Prompt Again</button>
                     {/if}
                   </div>
                   {#if unresolvedSleepMembers.length}
@@ -3526,7 +3527,7 @@
 
                     {#if p.npc.kind === "Apprentice" || p.npc.kind === "Other"}
                       <div class="grid grid-cols-4 gap-1 mt-1">
-                        {#each ["STR", "DEX", "INT", "WIL"] as attr}
+                        {#each ATTRIBUTES as attr}
                           <label class="text-[9px]">
                             {attr}
                             <input

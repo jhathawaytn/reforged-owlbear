@@ -1,4 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// compendium.ts imports DicePlus/Notifier, which import the Owlbear SDK, and
+// the SDK reads `window` at import time. These tests only touch the static
+// tables, so a stub SDK is enough to load the module under Node.
+vi.mock("@owlbear-rodeo/sdk", () => ({ default: {} }));
+
 import { COMPENDIUM, compendiumItemToGear } from "./compendium";
 
 function item(name: string) {
