@@ -44,7 +44,7 @@ don't reintroduce a leading `/` in those paths.
 **Owlbear caches extension iframes hard.** The Sep 27-28 work added three layers to make
 players actually get a new build:
 - The manifest's `popover` points at `app.html?build=NNN`. Bump `NNN` on each user-visible
-  release (`029` at 0.1.19).
+  release (`030` at 0.1.20).
 - `public/loader.html` + `dist/app-assets.json` (the deploy workflow writes it after the build)
   let a stable loader page pick up the newest hashed assets without leaving the Owlbear iframe.
 - Versioned manifests (`public/manifest-v016.json`, `manifest-v017.json`, ...) give testers a
@@ -122,7 +122,9 @@ in response to a broadcast request from the GM (same trust model as the HP nudge
   state; dungeon camp, sleep quarter, camp preparation, meals and watches, with a
   Quiet Night / Rough Night / Camp Disaster result.
 
-Current version: **0.1.19** (popover `build=029`).
+Current version: **0.1.20** (popover `build=030`).
+
+**0.1.20 (Oct 4): V-001 closed as obsolete.** Rules v0.5 §3.2 now rolls 2d6+3 *in order* STR, DEX, INT, WIL, then one optional swap, which the sheet already did. Fixed the leftovers: the swap is disabled until all four are rolled (it could burn the swap on blank values), and the step label / Roll button now say "in order STR, DEX, INT, WIL".
 
 **Golden Boar playtest work (from Oct 3).** The playtest log, the recommendations, and Claude's
 audit live outside the repo in `Downloads\Share with Claude\owlbear\`
@@ -329,8 +331,8 @@ OVERBURDENED" stays visible on the main sheet via the Conditions box header.
 
 ## Backlog (after the current task)
 
-1. **Golden Boar batches 2-10** from `REFORGED_OWLBEAR_VTT_REVIEW.md`, next is Batch 2
-   (V-001 attribute pool). *(The old item 1, the Travel panel, shipped as the Expedition board,
+1. **Golden Boar batches 2-10** from `REFORGED_OWLBEAR_VTT_REVIEW.md`, next is Batch 3
+   (V-009 Scout quiver + ranged ammo). *(The old item 1, the Travel panel, shipped as the Expedition board,
    Sep 27-28.)*
 2. **`TESTING.md`'s remaining acceptance work** — Playwright against a mocked OBR SDK (GM +
    Player contexts side by side), the manual Owlbear checklist, the click-budget table, and
