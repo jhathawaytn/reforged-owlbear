@@ -24,7 +24,9 @@
 
   $: locked = $pc.characterCreationFinalized;
 
-  // 1. Attributes - roll once, one optional swap. attributeMax is kept
+  // 1. Attributes - §3.2: roll 2d6+3 in order STR, DEX, INT, WIL (ATTRIBUTES
+  // order), then one optional swap, allowed only after all four are rolled.
+  // attributeMax is kept
   // identical to attributes throughout Character Creation (see types.ts) -
   // nothing has reduced or grown it yet, so there's no gap between them.
   async function rollAttributes() {
@@ -41,7 +43,7 @@
   let swapA: Attribute = "STR";
   let swapB: Attribute = "DEX";
   function applySwap() {
-    if ($pc.attributeSwapUsed || locked || swapA === swapB) return;
+    if (!$pc.attributesRolled || $pc.attributeSwapUsed || locked || swapA === swapB) return;
     $pc.attributes = { ...$pc.attributes, [swapA]: $pc.attributes[swapB], [swapB]: $pc.attributes[swapA] };
     $pc.attributeMax = { ...$pc.attributes };
     $pc.attributeSwapUsed = true;
@@ -258,7 +260,7 @@
 
     <div id="cc-step-1" class="border rounded-md p-2">
       <div class="font-bold text-sm">
-        1. Attributes <span class="text-xs text-gray-500 italic font-normal">§3.2 - 2d6+3 x4, assign, one optional swap</span>
+        1. Attributes <span class="text-xs text-gray-500 italic font-normal">§3.2 - 2d6+3 in order STR, DEX, INT, WIL, then one optional swap</span>
       </div>
       <div class="grid grid-cols-4 gap-2 mt-1">
         {#each ATTRIBUTES as attr}
@@ -277,20 +279,21 @@
         disabled={$pc.attributesRolled || locked}
         on:click={rollAttributes}
       >
-        {$pc.attributesRolled ? "Rolled" : "Roll 2d6+3 x4"}
+        {$pc.attributesRolled ? "Rolled" : "Roll 2d6+3: STR, DEX, INT, WIL"}
       </button>
       <div class="flex gap-1 mt-2 items-center text-xs flex-wrap">
         <span class="text-gray-500">Swap:</span>
-        <select bind:value={swapA} disabled={$pc.attributeSwapUsed || locked}>
+        <select bind:value={swapA} disabled={!$pc.attributesRolled || $pc.attributeSwapUsed || locked}>
           {#each ATTRIBUTES as a}<option value={a}>{a}</option>{/each}
         </select>
         <span>&harr;</span>
-        <select bind:value={swapB} disabled={$pc.attributeSwapUsed || locked}>
+        <select bind:value={swapB} disabled={!$pc.attributesRolled || $pc.attributeSwapUsed || locked}>
           {#each ATTRIBUTES as a}<option value={a}>{a}</option>{/each}
         </select>
         <button
           class="px-2 py-0.5 rounded-md border"
-          disabled={$pc.attributeSwapUsed || locked || swapA === swapB}
+          title={$pc.attributesRolled ? "" : "Roll all four Attributes first (§3.2)."}
+          disabled={!$pc.attributesRolled || $pc.attributeSwapUsed || locked || swapA === swapB}
           on:click={applySwap}
         >
           {$pc.attributeSwapUsed ? "Swap used" : "Apply swap (once)"}
