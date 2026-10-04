@@ -44,7 +44,7 @@ don't reintroduce a leading `/` in those paths.
 **Owlbear caches extension iframes hard.** The Sep 27-28 work added three layers to make
 players actually get a new build:
 - The manifest's `popover` points at `app.html?build=NNN`. Bump `NNN` on each user-visible
-  release (`028` at 0.1.18).
+  release (`029` at 0.1.19).
 - `public/loader.html` + `dist/app-assets.json` (the deploy workflow writes it after the build)
   let a stable loader page pick up the newest hashed assets without leaving the Owlbear iframe.
 - Versioned manifests (`public/manifest-v016.json`, `manifest-v017.json`, ...) give testers a
@@ -122,7 +122,27 @@ in response to a broadcast request from the GM (same trust model as the HP nudge
   state; dungeon camp, sleep quarter, camp preparation, meals and watches, with a
   Quiet Night / Rough Night / Camp Disaster result.
 
-Current version: **0.1.18** (popover `build=028`).
+Current version: **0.1.19** (popover `build=029`).
+
+**Golden Boar playtest work (from Oct 3).** The playtest log, the recommendations, and Claude's
+audit live outside the repo in `Downloads\Share with Claude\owlbear\`
+(`REFORGED_OWLBEAR_VTT_REVIEW.md` has the V-001…V-017 audit and the 10 numbered batches; Jason
+approved them one PR at a time). Jason's answers: Scout quiver = yes; offline-donor GM fallback =
+yes; auto-change when paying = yes; Hamlet Trade for Dungeon Events = **tabled**; Stabilize v1 =
+patient's player enters the helper's Save result.
+
+**0.1.19 (Oct 3): Batch 1 = V-015 + V-004.**
+- Known Route budget now stores the GM's **table pick** (`knownRouteBaseBudget`) and derives
+  the effective budget (+1 dangerous, −1 whole-journey Cautious, min 0) in
+  `src/lib/expeditionRules.ts`. Toggling a modifier no longer resets events resolved (that
+  could repeat events), and it's exact at the 0 floor. Old saves migrate in
+  `expeditionStateWithDefaults()` (the old `knownRouteEventBudget` had the modifiers baked in).
+- Declaring a non-Cautious Pace on a committed Known Route breaks the commitment (§11.8.2):
+  amber warning before Declare, then the commitment clears; resolved events are kept.
+- Quarter defaults are the ordinary day: Travel · Travel · Make Camp · Sleep. A Stand Watch set
+  in the Evening carries into the Night; the Make Camp leader no longer carries over.
+- New pure-rules module + tests pattern: `src/lib/expeditionRules.ts` / `.test.ts`. Pull more
+  Expedition math there as later batches touch it.
 
 **0.1.18 (Oct 3): checks green again.** `svelte-check` 0 errors, `npm test` 80/80, build clean.
 - **Real bug fixed:** the sleepers' "Prompt Again" button passed its click event as the Rest
@@ -309,8 +329,9 @@ OVERBURDENED" stays visible on the main sheet via the Conditions box header.
 
 ## Backlog (after the current task)
 
-1. **Jason's virtual-playtest report and update recommendations** (incoming Oct 3): triage
-   them first. *(The old item 1, the Travel panel, shipped as the Expedition board, Sep 27-28.)*
+1. **Golden Boar batches 2-10** from `REFORGED_OWLBEAR_VTT_REVIEW.md`, next is Batch 2
+   (V-001 attribute pool). *(The old item 1, the Travel panel, shipped as the Expedition board,
+   Sep 27-28.)*
 2. **`TESTING.md`'s remaining acceptance work** — Playwright against a mocked OBR SDK (GM +
    Player contexts side by side), the manual Owlbear checklist, the click-budget table, and
    the rules-ambiguities list for Jason. The Vitest half is done (`npm test`).
