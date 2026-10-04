@@ -4,6 +4,8 @@
   import type { Attack, GearItem } from "../types";
   import { rollNotation } from "../services/DicePlus";
   import { notify } from "../services/Notifier";
+  import { PlayerCharacterStore as pc } from "../model/ReforgedCharacter";
+  import { checkAmmunition, recordAmmunitionUse } from "../ammunition";
 
   // One instance per Attack row, matching WeaponStressButton's pattern -
   // each Gambit declaration is entirely local to its own modal, no shared
@@ -64,6 +66,12 @@
   }
 
   async function rollDamage() {
+    // §9.4.8 - no usable stock, no shot (and so nothing to Gambit with).
+    const ammo = checkAmmunition($pc, attack);
+    if (!ammo.ok) {
+      notify(ammo.message);
+      return;
+    }
     const { notation, broken } = effectiveRoll();
     if (broken) {
       notify(`${attack.name || "Attack"}: Broken - no normal damage, can't Gambit.`);
@@ -74,6 +82,8 @@
       notify(`${attack.name || "Attack"}: couldn't parse "${notation}"`);
       return;
     }
+    recordAmmunitionUse($pc, ammo.stock);
+    $pc = $pc;
     damage = result.total;
     sacrifice = 0;
     resultLog = `Rolled ${result.breakdown}.`;

@@ -508,6 +508,9 @@ export type ReforgedCharacter = {
   frayRound: number;
   techniquesUsedNames: TechniqueName[];
   techniqueUsedThisStageInstance: boolean;
+  // Gear ids of ammunition stocks fired from during the current combat;
+  // each gets one Usage roll at End Combat (§9.4.8). See ammunition.ts.
+  ammoUsedThisCombat: string[];
 
   // combat
   attacks: Attack[];

@@ -44,7 +44,7 @@ don't reintroduce a leading `/` in those paths.
 **Owlbear caches extension iframes hard.** The Sep 27-28 work added three layers to make
 players actually get a new build:
 - The manifest's `popover` points at `app.html?build=NNN`. Bump `NNN` on each user-visible
-  release (`030` at 0.1.20).
+  release (`031` at 0.1.21).
 - `public/loader.html` + `dist/app-assets.json` (the deploy workflow writes it after the build)
   let a stable loader page pick up the newest hashed assets without leaving the Owlbear iframe.
 - Versioned manifests (`public/manifest-v016.json`, `manifest-v017.json`, ...) give testers a
@@ -122,7 +122,25 @@ in response to a broadcast request from the GM (same trust model as the HP nudge
   state; dungeon camp, sleep quarter, camp preparation, meals and watches, with a
   Quiet Night / Rough Night / Camp Disaster result.
 
-Current version: **0.1.20** (popover `build=030`).
+Current version: **0.1.21** (popover `build=031`).
+
+**Rules source moved on:** Jason's current rules text is `PLAYTEST_1_V0.5.md` (in
+`Downloads\Share with Claude\playtest_1\`), newer than the `docs/PLAYTEST_1_v0.4.pdf` in this
+repo. Check v0.5 first when a rule matters.
+
+**0.1.21 (Oct 4): Batch 3 = V-009, ranged ammunition (§9.4.8).** `src/lib/ammunition.ts` (+ tests):
+- Weapon → stock by name: bows → Arrow Quiver, crossbows → Bolt Case, slings → Sling Stone
+  Pouch; everything else (melee, individually tracked thrown weapons) is never blocked. A
+  Thrown Weapon Bundle isn't tied to any weapon row, so it isn't checked.
+- All five damage-roll paths check first (Roll, Act Decisively, Tactical Consideration,
+  Gambit, Weapon Stress - Stress checks *before* degrading). No usable stock → blocked with
+  "No Arrow Quiver available - it cannot be fired." Attack rows show the stock in use, or the
+  reason in red.
+- During combat each stock fired from is recorded in `pc.ammoUsedThisCombat`; **End Combat**
+  rolls each once (1-3 steps down) and posts the results. Multiple stocks: keeps drawing from
+  the one already used this combat, else the first usable one.
+- Scout's "+ Add Signature Weapon" also adds 1 Arrow Quiver (d10, 1 slot) (`startingAmmunition`
+  in `careers.ts`, per rules v0.5). Existing Scouts don't get one retroactively.
 
 **0.1.20 (Oct 4): V-001 closed as obsolete.** Rules v0.5 §3.2 now rolls 2d6+3 *in order* STR, DEX, INT, WIL, then one optional swap, which the sheet already did. Fixed the leftovers: the swap is disabled until all four are rolled (it could burn the swap on blank values), and the step label / Roll button now say "in order STR, DEX, INT, WIL".
 
@@ -331,8 +349,8 @@ OVERBURDENED" stays visible on the main sheet via the Conditions box header.
 
 ## Backlog (after the current task)
 
-1. **Golden Boar batches 2-10** from `REFORGED_OWLBEAR_VTT_REVIEW.md`, next is Batch 3
-   (V-009 Scout quiver + ranged ammo). *(The old item 1, the Travel panel, shipped as the Expedition board,
+1. **Golden Boar batches 2-10** from `REFORGED_OWLBEAR_VTT_REVIEW.md`, next is Batch 4
+   (V-002 buying gear spends coin). *(The old item 1, the Travel panel, shipped as the Expedition board,
    Sep 27-28.)*
 2. **`TESTING.md`'s remaining acceptance work** — Playwright against a mocked OBR SDK (GM +
    Player contexts side by side), the manual Owlbear checklist, the click-budget table, and

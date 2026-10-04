@@ -15,6 +15,7 @@
   import type { SkillTreeName, SkillNodeId } from "../skillTrees";
   import { newId } from "../utils";
   import type { GearItem } from "../types";
+  import { COMPENDIUM, compendiumItemToGear } from "../compendium";
   import CareerQuestionnaire from "./CareerQuestionnaire.svelte";
 
   // "Free" intent per row (Career Pick during character creation) - only
@@ -58,7 +59,10 @@
       condition: "Healthy",
       notes: sw.properties === "-" ? sw.special : `${sw.properties}. ${sw.special}`,
     };
-    $pc.gear = [...$pc.gear, gearItem];
+    const ammoEntry = CAREERS[c].startingAmmunition
+      ? COMPENDIUM.find((i) => i.name === CAREERS[c].startingAmmunition)
+      : undefined;
+    $pc.gear = [...$pc.gear, gearItem, ...(ammoEntry ? [compendiumItemToGear(ammoEntry)] : [])];
     $pc.attacks = [
       ...$pc.attacks,
       {
@@ -166,7 +170,7 @@
             ? "Only your first Career grants a Signature Weapon (§4.1)"
             : hasSignatureWeapon(c)
               ? "Already added"
-              : "Add this Career's Signature Weapon to Gear (equipped, Standard/Healthy) and Attacks & Techniques"}
+              : `Add this Career's Signature Weapon to Gear (equipped, Standard/Healthy) and Attacks & Techniques${CAREERS[c].startingAmmunition ? `, plus its starting ${CAREERS[c].startingAmmunition}` : ""}`}
           on:click={() => addSignatureWeapon(c)}
         >
           + Add Signature Weapon
@@ -180,6 +184,9 @@
         {CAREERS[c].signatureWeapon.name} - {CAREERS[c].signatureWeapon.profileLabel}, {CAREERS[c].signatureWeapon
           .damageType}{CAREERS[c].signatureWeapon.properties !== "-" ? `, ${CAREERS[c].signatureWeapon.properties}` : ""}.
         {CAREERS[c].signatureWeapon.special}
+        {#if CAREERS[c].startingAmmunition}
+          <span class="font-semibold">Starting Ammunition:</span> 1 {CAREERS[c].startingAmmunition}.
+        {/if}
       </div>
       <div class="text-xs flex items-center gap-2">
         <span class="font-semibold">Trinket:</span>

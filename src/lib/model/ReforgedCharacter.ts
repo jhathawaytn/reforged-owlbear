@@ -47,6 +47,7 @@ export function defaultPC(): ReforgedCharacter {
     frayRound: 0,
     techniquesUsedNames: [],
     techniqueUsedThisStageInstance: false,
+    ammoUsedThisCombat: [],
 
     attacks: [],
 
@@ -202,8 +203,11 @@ export function startCombat(pc: ReforgedCharacter): void {
   pc.frayRound = 0;
   pc.techniquesUsedNames = [];
   pc.techniqueUsedThisStageInstance = false;
+  pc.ammoUsedThisCombat = [];
 }
 
+// The caller resolves the after-combat ammunition Usage rolls (they need
+// dice) before calling this; endCombat just clears the tracker.
 export function endCombat(pc: ReforgedCharacter): void {
   pc.combatActive = false;
   pc.combatStage = null;
@@ -211,6 +215,7 @@ export function endCombat(pc: ReforgedCharacter): void {
   pc.strain = 0;
   pc.techniquesUsedNames = [];
   pc.techniqueUsedThisStageInstance = false;
+  pc.ammoUsedThisCombat = [];
 }
 
 // Advances Initiative -> Clash -> Fray, then loops within Fray (a new Fray

@@ -1,7 +1,10 @@
 <script lang="ts">
   import { PlayerCharacterStore as pc, canUseTechnique, useTechnique, startCombat, endCombat, advanceCombatStage } from "../model/ReforgedCharacter";
-  import { techniqueCapacityForLevel, TECHNIQUES, COMBAT_STAGES } from "../types";
-  import type { TechniqueName, CombatStage } from "../types";
+  import { techniqueCapacityForLevel, TECHNIQUES, COMBAT_STAGES, DIE_SIDES } from "../types";
+  import type { TechniqueName, CombatStage, DieSize } from "../types";
+  import { stocksToRollAfterCombat, ammunitionAfterRoll } from "../ammunition";
+  import { rollSingleDie } from "../services/DicePlus";
+  import { notify } from "../services/Notifier";
   import type { SaveRollResult } from "../utils";
   import RollButton from "./RollButton.svelte";
   import Modal from "./Modal.svelte";
@@ -44,10 +47,28 @@
     $pc = $pc;
     initiativeFailed = false;
   }
-  function doEnd() {
-    endCombat($pc);
-    $pc = $pc;
-    initiativeFailed = false;
+  // §9.4.8 - each ammunition stock fired from this combat rolls its Usage
+  // Die once now; 1–3 steps it down.
+  let ending = false;
+  async function doEnd() {
+    if (ending) return;
+    ending = true;
+    try {
+      const lines: string[] = [];
+      for (const stock of stocksToRollAfterCombat($pc)) {
+        const before = stock.usageDie as DieSize;
+        const roll = await rollSingleDie(DIE_SIDES[before], { rollTarget: "everyone", showResults: true });
+        const after = ammunitionAfterRoll(before, roll);
+        stock.usageDie = after;
+        lines.push(`${stock.name} ${before}: ${roll} - ${after === before ? "holds" : after === "depleted" ? "depleted" : `steps to ${after}`}`);
+      }
+      endCombat($pc);
+      $pc = $pc;
+      initiativeFailed = false;
+      if (lines.length) notify(`After combat, ammunition: ${lines.join("; ")}.`);
+    } finally {
+      ending = false;
+    }
   }
   function doAdvance() {
     advanceCombatStage($pc);
@@ -93,7 +114,7 @@
   <div class="w-full flex flex-col gap-2 text-sm max-h-[70vh] overflow-y-auto pr-1">
     <div class="flex items-center gap-2">
       {#if $pc.combatActive}
-        <button class="border rounded-md px-2 py-1 text-xs" on:click={doEnd}>End Combat</button>
+        <button class="border rounded-md px-2 py-1 text-xs" on:click={doEnd} disabled={ending}>End Combat</button>
         <button class="bg-black text-white rounded-md px-2 py-1 text-xs" on:click={doAdvance}>
           {nextStageLabel($pc.combatStage)}
         </button>

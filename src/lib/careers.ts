@@ -19,6 +19,9 @@ export type Career = {
   name: CareerName;
   commonKnowledge: string;
   signatureWeapon: SignatureWeapon;
+  // Compendium name of a stock granted with the Signature Weapon (rules v0.5
+  // Scout: "Starting Ammunition 1 Arrow Quiver (d10, 1 slot)").
+  startingAmmunition?: string;
   treeAccess: string[];
   talentAccess: { category: string; talents: string[] }[];
   trinkets: string[];
@@ -118,6 +121,7 @@ export const CAREERS: Record<CareerName, Career> = {
       special:
         "Maintained: at the start of each session, if this weapon is Damaged, restore it to Healthy. Cannot repair a Broken weapon.",
     },
+    startingAmmunition: "Arrow Quiver",
     treeAccess: ["Tracking", "Ambush", "Wilderness Craft"],
     talentAccess: [
       {
