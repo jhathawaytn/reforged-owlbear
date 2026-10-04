@@ -5,6 +5,7 @@
   import { notify } from "../services/Notifier";
   import { stepWeaponDie, stepWeaponDieUp } from "../types";
   import type { Attack, GearItem } from "../types";
+  import { checkAmmunition, recordAmmunitionUse } from "../ammunition";
   import WeaponStressButton from "./WeaponStressButton.svelte";
   import GambitButton from "./GambitButton.svelte";
 
@@ -29,7 +30,24 @@
     return { notation: a.roll, broken: true };
   }
 
+  // §9.4.8: a ranged weapon with no usable stock cannot be fired. Returns
+  // the stock to record (null = needs none), or false when blocked.
+  function ammoOrBlock(a: Attack): GearItem | null | false {
+    const check = checkAmmunition($pc, a);
+    if (!check.ok) {
+      notify(check.message);
+      return false;
+    }
+    return check.stock;
+  }
+  function recordShot(stock: GearItem | null) {
+    recordAmmunitionUse($pc, stock);
+    $pc = $pc;
+  }
+
   async function rollAttack(a: Attack) {
+    const stock = ammoOrBlock(a);
+    if (stock === false) return;
     const { notation, broken } = effectiveRoll(a);
     if (broken) {
       notify(`${a.name || "Attack"}: Broken - no normal damage.`);
@@ -40,6 +58,7 @@
       notify(`${a.name || "Attack"}: couldn't parse "${notation}" (try e.g. d6, 2d6+1)`);
       return;
     }
+    recordShot(stock);
     notify(`${a.name || "Attack"}: ${result.breakdown}`);
   }
 
@@ -48,6 +67,8 @@
   // never changes.
   async function rollActDecisively(a: Attack) {
     if (!canUseTechnique($pc, "Act Decisively")) return;
+    const stock = ammoOrBlock(a);
+    if (stock === false) return;
     const { notation, broken } = effectiveRoll(a);
     if (broken) {
       notify(`${a.name || "Attack"}: Broken - no normal damage.`);
@@ -60,7 +81,7 @@
       return;
     }
     useTechnique($pc, "Act Decisively");
-    $pc = $pc;
+    recordShot(stock);
     notify(`${a.name || "Attack"} (Act Decisively, ${notation} → ${stepped}): ${result.breakdown}`);
   }
 
@@ -69,6 +90,8 @@
   // reporting the kept (second) roll.
   async function rollTacticalConsideration(a: Attack) {
     if (!canUseTechnique($pc, "Tactical Consideration")) return;
+    const stock = ammoOrBlock(a);
+    if (stock === false) return;
     const { notation, broken } = effectiveRoll(a);
     if (broken) {
       notify(`${a.name || "Attack"}: Broken - no normal damage.`);
@@ -81,7 +104,7 @@
       return;
     }
     useTechnique($pc, "Tactical Consideration");
-    $pc = $pc;
+    recordShot(stock);
     notify(
       `${a.name || "Attack"} (Tactical Consideration): first roll ${first.breakdown}, rerolled and kept ${second.breakdown}.`,
     );
@@ -99,6 +122,7 @@
     {#each $pc.attacks as a (a.id)}
       {@const gear = linkedGear(a)}
       {@const eff = effectiveRoll(a)}
+      {@const ammo = checkAmmunition($pc, a)}
       {@const stressable = !!gear && gear.condition !== "Broken" && gear.condition !== "Destroyed"}
       {@const gambitable = !gear || (gear.condition !== "Broken" && gear.condition !== "Destroyed")}
       {@const canActDecisively = $pc.combatActive && $pc.combatStage === "Initiative" && canUseTechnique($pc, "Act Decisively")}
@@ -151,6 +175,13 @@
               </button>
             {/if}
           </div>
+          {#if ammo.ok && ammo.stock}
+            <div class="text-[10px] text-gray-500" title="Rolled once after combat if used (§9.4.8)">
+              Ammo: {ammo.stock.name} {ammo.stock.usageDie}
+            </div>
+          {:else if !ammo.ok}
+            <div class="text-[10px] text-red-700">{ammo.message.replace(/^[^:]*: /, "")}</div>
+          {/if}
           {#if gear && gear.condition && gear.condition !== "Healthy"}
             <div class="text-[10px] text-gray-500">
               {gear.condition}{eff.broken ? " - no normal damage" : ` - rolls ${eff.notation}`}

@@ -13,6 +13,7 @@
   import type { Attack, GearItem } from "../types";
   import { rollNotation } from "../services/DicePlus";
   import { notify } from "../services/Notifier";
+  import { checkAmmunition, recordAmmunitionUse } from "../ammunition";
   import Menu from "./Menu/Menu.svelte";
   import MenuOption from "./Menu/MenuOption.svelte";
 
@@ -43,6 +44,14 @@
 
   async function applyStress(option: string, brutalSteps = 1) {
     close();
+    // §9.4.8 - checked before the weapon degrades: a weapon that can't be
+    // fired can't be Stressed either.
+    const ammo = checkAmmunition($pc, attack);
+    if (!ammo.ok) {
+      notify(ammo.message);
+      return;
+    }
+    recordAmmunitionUse($pc, ammo.stock);
     const steps = option === "Brutal" ? brutalSteps : 1;
     for (let i = 0; i < steps; i++) degradeCondition(gear);
     $pc.gear = $pc.gear;
