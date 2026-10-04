@@ -1,5 +1,6 @@
 import OBR from "@owlbear-rodeo/sdk";
 import { writable, get } from "svelte/store";
+import { legacyBaseBudget } from "../expeditionRules";
 
 export type ExpeditionMode = "wilderness" | "exploration";
 export type TravelQuarter = "Morning" | "Day" | "Evening" | "Night";
@@ -99,7 +100,10 @@ export type WildernessExpeditionState = {
   wildernessEventLastDie: number;
   wildernessEventLastRoll: number;
   wildernessEventOccurred: boolean;
-  knownRouteEventBudget: number;
+  // GM's pick from the §11.8.2 table, BEFORE the +1/−1 modifiers (−1 = not
+  // picked yet). The effective budget is derived - see expeditionRules.ts.
+  // Replaced `knownRouteEventBudget` (modifiers baked in) in 0.1.19.
+  knownRouteBaseBudget: number;
   knownRouteEventsResolved: number;
   knownRouteDangerous: boolean;
   knownRouteCautiousCommitment: boolean;
@@ -221,7 +225,7 @@ export const defaultExpeditionState = (): ExpeditionState => ({
     wildernessEventLastDie: 0,
     wildernessEventLastRoll: 0,
     wildernessEventOccurred: false,
-    knownRouteEventBudget: -1,
+    knownRouteBaseBudget: -1,
     knownRouteEventsResolved: 0,
     knownRouteDangerous: false,
     knownRouteCautiousCommitment: false,
@@ -252,11 +256,12 @@ export const ExpeditionStore = writable<ExpeditionState>(defaultExpeditionState(
 
 const EXPEDITION_METADATA_KEY = "rodeo.owlbear.reforged-sheet/expedition";
 
-function withDefaults(value: Partial<ExpeditionState> | undefined): ExpeditionState {
+export function expeditionStateWithDefaults(value: Partial<ExpeditionState> | undefined): ExpeditionState {
   const base = defaultExpeditionState();
   if (!value) return base;
-  const legacyWilderness = (value.wilderness ?? {}) as Partial<WildernessExpeditionState> & {
+  const { knownRouteEventBudget: legacyBudget, ...legacyWilderness } = (value.wilderness ?? {}) as Partial<WildernessExpeditionState> & {
     targetQuarters?: number;
+    knownRouteEventBudget?: number;
   };
   return {
     ...base,
@@ -264,6 +269,13 @@ function withDefaults(value: Partial<ExpeditionState> | undefined): ExpeditionSt
     wilderness: {
       ...base.wilderness,
       ...legacyWilderness,
+      knownRouteBaseBudget:
+        legacyWilderness.knownRouteBaseBudget ??
+        legacyBaseBudget(
+          legacyBudget ?? -1,
+          legacyWilderness.knownRouteDangerous ?? false,
+          legacyWilderness.knownRouteCautiousCommitment ?? false,
+        ),
       routeTimeQuarters:
         legacyWilderness.routeTimeQuarters ?? legacyWilderness.targetQuarters ?? base.wilderness.routeTimeQuarters,
       companyNpcs: (legacyWilderness.companyNpcs ?? base.wilderness.companyNpcs).map((npc) => ({
@@ -286,10 +298,10 @@ export async function initExpeditionStore(): Promise<void> {
   if (!OBR.isAvailable) return;
 
   const metadata = await OBR.room.getMetadata();
-  ExpeditionStore.set(withDefaults(metadata[EXPEDITION_METADATA_KEY] as Partial<ExpeditionState> | undefined));
+  ExpeditionStore.set(expeditionStateWithDefaults(metadata[EXPEDITION_METADATA_KEY] as Partial<ExpeditionState> | undefined));
 
   OBR.room.onMetadataChange((next) => {
-    ExpeditionStore.set(withDefaults(next[EXPEDITION_METADATA_KEY] as Partial<ExpeditionState> | undefined));
+    ExpeditionStore.set(expeditionStateWithDefaults(next[EXPEDITION_METADATA_KEY] as Partial<ExpeditionState> | undefined));
   });
 }
 

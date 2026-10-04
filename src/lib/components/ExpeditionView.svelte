@@ -50,6 +50,14 @@
   import { PlayerCharacterStore as localPc } from "../model/ReforgedCharacter";
   import type { Attribute, GearItem } from "../types";
   import { ATTRIBUTES } from "../types";
+  import {
+    knownRouteBaseRange,
+    knownRouteModifier,
+    effectiveKnownRouteBudget,
+    knownRouteEventsRemaining as knownRouteEventsRemainingFor,
+    declaringPaceBreaksCautiousCommitment,
+    defaultActivityForQuarter,
+  } from "../expeditionRules";
   import { lostAttributes } from "../services/RestRecovery";
   import {
     PendingExpeditionDailyStore,
@@ -360,34 +368,27 @@
   $: unmappedEventDue =
     $expedition.wilderness.routeMode === "Unmapped Country" &&
     $expedition.wilderness.wildernessEventCheckedDay !== $expedition.wilderness.day;
-  $: knownRouteBaseEventRange =
-    $expedition.wilderness.routeTimeQuarters <= 0
-      ? { min: 0, max: 0 }
-      : $expedition.wilderness.routeTimeQuarters <= 2
-        ? { min: 0, max: 1 }
-        : $expedition.wilderness.routeTimeQuarters <= 7
-          ? { min: 1, max: 2 }
-          : { min: 2, max: 3 };
-  $: knownRouteEventMin = Math.max(
-    0,
-    knownRouteBaseEventRange.min +
-      ($expedition.wilderness.knownRouteDangerous ? 1 : 0) -
-      ($expedition.wilderness.knownRouteCautiousCommitment ? 1 : 0),
+  $: knownRouteBaseEventRange = knownRouteBaseRange($expedition.wilderness.routeTimeQuarters);
+  $: knownRouteModifierNow = knownRouteModifier(
+    $expedition.wilderness.knownRouteDangerous,
+    $expedition.wilderness.knownRouteCautiousCommitment,
   );
-  $: knownRouteEventMax = Math.max(
-    0,
-    knownRouteBaseEventRange.max +
-      ($expedition.wilderness.knownRouteDangerous ? 1 : 0) -
-      ($expedition.wilderness.knownRouteCautiousCommitment ? 1 : 0),
+  $: knownRouteEffectiveBudget = effectiveKnownRouteBudget(
+    $expedition.wilderness.knownRouteBaseBudget,
+    $expedition.wilderness.knownRouteDangerous,
+    $expedition.wilderness.knownRouteCautiousCommitment,
   );
-  $: knownRouteEventsRemaining =
-    $expedition.wilderness.knownRouteEventBudget < 0
-      ? 0
-      : Math.max(
-          0,
-          $expedition.wilderness.knownRouteEventBudget -
-            $expedition.wilderness.knownRouteEventsResolved,
-        );
+  $: knownRouteEventsRemaining = knownRouteEventsRemainingFor(
+    knownRouteEffectiveBudget,
+    $expedition.wilderness.knownRouteEventsResolved,
+  );
+  // §11.8.2: any non-Cautious Pace on a Known Route breaks a whole-journey
+  // Cautious commitment. Shown as a warning before the GM declares Pace.
+  $: paceWillBreakCautiousCommitment = declaringPaceBreaksCautiousCommitment(
+    $expedition.wilderness.routeMode,
+    $expedition.wilderness.knownRouteCautiousCommitment,
+    $expedition.wilderness.pace,
+  );
   $: workflowStep = (
     !climateReady
       ? "climate"
@@ -1066,6 +1067,16 @@
       return;
     }
     dayMessage = "";
+    if (paceWillBreakCautiousCommitment) {
+      // Breaking the commitment removes only its −1; events already resolved
+      // stay resolved, and the GM's base budget is untouched.
+      await patchWilderness({
+        paceDeclaredDay: $expedition.wilderness.day,
+        knownRouteCautiousCommitment: false,
+      });
+      dayMessage = `${$expedition.wilderness.pace} Pace broke the whole-journey Cautious commitment: the Known Route Event budget is no longer reduced by 1.`;
+      return;
+    }
     await patchWilderness({ paceDeclaredDay: $expedition.wilderness.day });
   }
 
@@ -1086,25 +1097,23 @@
     return { quarter: QUARTERS[idx + 1], newDay: false };
   }
 
-  function defaultActivityForQuarter(q: TravelQuarter): WildernessActivity | null {
-    if (q === "Morning" || q === "Day") return "Travel";
-    if (q === "Evening") return "Sleep";
-    return null;
-  }
-
   function assignmentsForQuarter(q: TravelQuarter): ExpeditionAssignment[] {
     const activity = defaultActivityForQuarter(q);
-    if (!activity) return $expedition.wilderness.assignments;
 
     return company.map((member) => {
       const current = assignmentFor(member.id);
+      // A watcher the GM deliberately set for the Evening keeps watching into
+      // the Night; everyone else gets the ordinary-day default.
+      if (q === "Night" && current?.activity === "Stand Watch") {
+        return { ...current, playerId: member.id };
+      }
       return { ...current, playerId: member.id, activity };
     });
   }
 
   function resetKnownRouteEventState() {
     return {
-      knownRouteEventBudget: -1,
+      knownRouteBaseBudget: -1,
       knownRouteEventsResolved: 0,
       knownRouteDangerous: false,
       knownRouteCautiousCommitment: false,
@@ -1170,21 +1179,17 @@
     });
   }
 
-  async function setKnownRouteEventBudget(value: number) {
+  // The GM's pick from the §11.8.2 table is stored as the base; the +1 / −1
+  // modifiers are applied on top (see expeditionRules.ts). Events already
+  // resolved are never reset by changing the budget or a modifier.
+  async function setKnownRouteBaseBudget(value: number) {
     if (!$isGM || $expedition.wilderness.routeMode !== "Known Route") return;
-    const budget = Number.isFinite(value) ? Math.max(0, Math.min(99, value)) : -1;
-    await patchWilderness({
-      knownRouteEventBudget: budget,
-      knownRouteEventsResolved: Math.min($expedition.wilderness.knownRouteEventsResolved, budget),
-    });
+    const base = Number.isFinite(value) ? Math.max(0, Math.min(99, value)) : -1;
+    await patchWilderness({ knownRouteBaseBudget: base });
   }
 
   async function resolveKnownRouteEvent() {
-    if (
-      !$isGM ||
-      $expedition.wilderness.knownRouteEventBudget < 0 ||
-      knownRouteEventsRemaining <= 0
-    ) return;
+    if (!$isGM || knownRouteEffectiveBudget < 0 || knownRouteEventsRemaining <= 0) return;
     await patchWilderness({
       knownRouteEventsResolved: $expedition.wilderness.knownRouteEventsResolved + 1,
     });
@@ -1192,20 +1197,12 @@
 
   async function setKnownRouteDangerous(value: boolean) {
     if (!$isGM) return;
-    await patchWilderness({
-      knownRouteDangerous: value,
-      knownRouteEventBudget: -1,
-      knownRouteEventsResolved: 0,
-    });
+    await patchWilderness({ knownRouteDangerous: value });
   }
 
   async function setKnownRouteCautiousCommitment(value: boolean) {
     if (!$isGM) return;
-    await patchWilderness({
-      knownRouteCautiousCommitment: value,
-      knownRouteEventBudget: -1,
-      knownRouteEventsResolved: 0,
-    });
+    await patchWilderness({ knownRouteCautiousCommitment: value });
   }
 
   function onPaceChange(e: Event) {
@@ -2327,10 +2324,9 @@
     }
 
     const nextAssignments = assignmentsForQuarter(next.quarter);
-    const nextMakeCampLeaderId =
-      defaultActivityForQuarter(next.quarter) === null
-        ? $expedition.wilderness.makeCampLeaderId
-        : "";
+    // Every Quarter now gets a fresh default plan, so the previous Quarter's
+    // Make Camp leader never carries over.
+    const nextMakeCampLeaderId = "";
 
     await patchWilderness({
       progress,
@@ -2624,6 +2620,13 @@
                 <button class="primary-action" on:click={declarePace}>Declare Pace</button>
               {/if}
             </div>
+            {#if $isGM && paceWillBreakCautiousCommitment}
+              <div class="mt-1 border border-amber-500 bg-amber-50 rounded px-2 py-1 text-[10px]">
+                The Company committed to Cautious Pace for this whole Known Route. Declaring
+                {$expedition.wilderness.pace} breaks that commitment: the Event budget loses its −1
+                (§11.8.2). Events already resolved stay resolved.
+              </div>
+            {/if}
           {:else if workflowStep === "plan"}
             <div class="mt-2">
               <div class="text-[10px] text-gray-600 mb-1">
@@ -2798,7 +2801,7 @@
               </div>
               {#if $expedition.wilderness.routeMode === "Unmapped Country"}
                 <span class="status-chip">{unmappedEventDue ? "CHECK DUE" : "CHECKED"}</span>
-              {:else if $expedition.wilderness.knownRouteEventBudget < 0}
+              {:else if knownRouteEffectiveBudget < 0}
                 <span class="status-chip">SET BUDGET</span>
               {:else}
                 <span class="status-chip">{knownRouteEventsRemaining} REMAIN</span>
@@ -2841,8 +2844,9 @@
                   <div class="text-[10px]">Enter the recorded route time to determine the whole-journey Event budget range.</div>
                 {:else}
                   <div class="text-[10px]">
-                    Whole-journey budget guideline: <span class="font-bold">{knownRouteEventMin}–{knownRouteEventMax}</span>
-                    event{knownRouteEventMax === 1 ? "" : "s"} for {$expedition.wilderness.routeTimeQuarters} recorded Quarter{$expedition.wilderness.routeTimeQuarters === 1 ? "" : "s"}.
+                    Table range: <span class="font-bold">{knownRouteBaseEventRange.min}–{knownRouteBaseEventRange.max}</span>
+                    event{knownRouteBaseEventRange.max === 1 ? "" : "s"} for {$expedition.wilderness.routeTimeQuarters} recorded Quarter{$expedition.wilderness.routeTimeQuarters === 1 ? "" : "s"}
+                    (§11.8.2). Pick a number from it; the modifiers below are applied for you.
                   </div>
                   <div class="flex flex-wrap gap-3 mt-1 text-[10px]">
                     <label class="flex items-center gap-1">
@@ -2863,20 +2867,22 @@
                     </label>
                   </div>
                   <div class="flex items-end gap-2 mt-2">
-                    <label>
-                      Event Budget
+                    <label title="Your pick from the table range, before the +1 / −1 modifiers.">
+                      Table Roll
                       <input
                         class="w-20"
                         type="number"
                         min="0"
-                        value={$expedition.wilderness.knownRouteEventBudget < 0 ? "" : $expedition.wilderness.knownRouteEventBudget}
-                        placeholder={`${knownRouteEventMin}–${knownRouteEventMax}`}
-                        on:change={(e) => setKnownRouteEventBudget(parseInt(e.currentTarget.value, 10))}
+                        value={$expedition.wilderness.knownRouteBaseBudget < 0 ? "" : $expedition.wilderness.knownRouteBaseBudget}
+                        placeholder={`${knownRouteBaseEventRange.min}–${knownRouteBaseEventRange.max}`}
+                        on:change={(e) => setKnownRouteBaseBudget(parseInt(e.currentTarget.value, 10))}
                       />
                     </label>
-                    {#if $expedition.wilderness.knownRouteEventBudget >= 0}
+                    {#if knownRouteEffectiveBudget >= 0}
                       <div class="text-[10px] pb-1">
-                        {$expedition.wilderness.knownRouteEventsResolved} resolved · {knownRouteEventsRemaining} remaining
+                        Budget <span class="font-bold">{knownRouteEffectiveBudget}</span>{#if knownRouteModifierNow !== 0}
+                          ({knownRouteModifierNow > 0 ? "+" : "−"}{Math.abs(knownRouteModifierNow)} modifiers){/if}
+                        · {$expedition.wilderness.knownRouteEventsResolved} resolved · {knownRouteEventsRemaining} remaining
                       </div>
                       <button
                         class="border rounded px-2 py-1 text-[10px] mb-0.5"
@@ -3406,7 +3412,7 @@
 
         <h2>QUARTER PLAN</h2>
         <div class="text-[10px] text-gray-500 mb-1">
-          Common Activities prefill by Quarter: Morning/Day Travel, Evening Sleep, Night carries the current plan. Roles stay assigned until you change them.
+          Common Activities prefill by Quarter (the ordinary day): Morning/Day Travel, Evening Make Camp, Night Sleep. A Stand Watch set for the Evening carries into the Night. Roles stay assigned until you change them.
         </div>
         <div class="text-[9px] text-gray-400 mb-2">
           Owlbear party: {$PartyStore.filter((p) => p.role === "PLAYER").length}
