@@ -250,6 +250,16 @@ export function compendiumItemToGear(item: CompendiumItem, id: string = newId())
   };
 }
 
+// The character with one compendium item added; a weapon also gets its
+// attack row, linked to the new gear. Shared by Buy and Add free.
+export function withCompendiumItem(pc: ReforgedCharacter, item: CompendiumItem, gearId: string = newId()): ReforgedCharacter {
+  const gear = [...pc.gear, compendiumItemToGear(item, gearId)];
+  if (item.category !== "Weapon") return { ...pc, gear };
+  const noteParts = [item.damageType, item.properties !== "-" ? item.properties : "", item.specialStress !== "-" ? item.specialStress : ""].filter(Boolean);
+  const attacks = [...pc.attacks, { id: newId(), name: item.name, roll: item.damageDie, notes: noteParts.join(", "), gearId }];
+  return { ...pc, gear, attacks };
+}
+
 // §3.10 Starting Equipment - every character begins with these five items,
 // recorded at their listed Usage Die size (Trail Rations/Waterskin/Torch
 // Bundle are NOT rolled during character creation).

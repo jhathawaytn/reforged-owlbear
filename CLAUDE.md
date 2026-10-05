@@ -44,7 +44,7 @@ don't reintroduce a leading `/` in those paths.
 **Owlbear caches extension iframes hard.** The Sep 27-28 work added three layers to make
 players actually get a new build:
 - The manifest's `popover` points at `app.html?build=NNN`. Bump `NNN` on each user-visible
-  release (`031` at 0.1.21).
+  release (`032` at 0.1.22).
 - `public/loader.html` + `dist/app-assets.json` (the deploy workflow writes it after the build)
   let a stable loader page pick up the newest hashed assets without leaving the Owlbear iframe.
 - Versioned manifests (`public/manifest-v016.json`, `manifest-v017.json`, ...) give testers a
@@ -122,11 +122,23 @@ in response to a broadcast request from the GM (same trust model as the HP nudge
   state; dungeon camp, sleep quarter, camp preparation, meals and watches, with a
   Quiet Night / Rough Night / Camp Disaster result.
 
-Current version: **0.1.21** (popover `build=031`).
+Current version: **0.1.22** (popover `build=032`).
 
 **Rules source moved on:** Jason's current rules text is `PLAYTEST_1_V0.5.md` (in
 `Downloads\Share with Claude\playtest_1\`), newer than the `docs/PLAYTEST_1_v0.4.pdf` in this
 repo. Check v0.5 first when a rule matters.
+
+**0.1.22 (Oct 5): Batch 4 = V-002, buying gear.** `src/lib/coins.ts` (+ tests):
+- The Gear window has **Buy** and **Add free** (loot / GM grant) on every row. Buy opens a
+  confirmation: listed price, Haggler price (90%, rounded **up** to the next farthing, per the
+  M-003 ruling; automatic when the character owns the Haggler Talent), the coins paid and the
+  change, coin left, and the slot result in red if the buy would make them Overburdened. Not
+  enough coin → Confirm is disabled with "short by N".
+- All coin math is in farthings (4 fa = 1 SP, 10 SP = 1 GP, 25 GP = 1 GC). Payment spends the
+  smallest coins first, then hands back any it didn't need, and change comes back in the fewest
+  coins (Jason's D3 = yes, break coins automatically). Prices display like the book: SP + fa.
+- "5 SP each" is the price of one; "negligible" buys for 0; "-" (Fresh Rations) can't be
+  bought, only added free. Shared add-item logic is `withCompendiumItem` in `compendium.ts`.
 
 **0.1.21 (Oct 4): Batch 3 = V-009, ranged ammunition (§9.4.8).** `src/lib/ammunition.ts` (+ tests):
 - Weapon → stock by name: bows → Arrow Quiver, crossbows → Bolt Case, slings → Sling Stone
