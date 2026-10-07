@@ -1,6 +1,6 @@
 import OBR from "@owlbear-rodeo/sdk";
 import type { Player } from "@owlbear-rodeo/sdk";
-import { withDefaults } from "../model/ReforgedCharacter";
+import { withDefaults, isOverburdened } from "../model/ReforgedCharacter";
 import { PlayerCharacterStore } from "../model/ReforgedCharacter";
 import { debounce, clamp } from "../utils";
 import { writable, get, derived } from "svelte/store";
@@ -107,7 +107,8 @@ function subscribeToRoomNotifications() {
 // Trust-based, like every other broadcast this extension sends - there's no
 // real auth on an OBR room broadcast.
 export const HP_NUDGE_KEY = pluginId("gm-hp-nudge");
-type HPNudge = { targetPlayerId: string; delta: number; reason: string; fromName: string };
+const HP_NUDGE_RESULT_KEY = pluginId("gm-hp-nudge-result");
+type HPNudge = { targetPlayerId: string; delta: number; reason: string; fromName: string; requestId?: string };
 
 function subscribeToHPNudges() {
   OBR.broadcast.onMessage(HP_NUDGE_KEY, ({ data }) => {
@@ -120,13 +121,40 @@ function subscribeToHPNudges() {
     showPopover(
       `${nudge.fromName}: ${nudge.delta >= 0 ? "+" : ""}${nudge.delta} HP${nudge.reason ? ` (${nudge.reason})` : ""} - ${before} -> ${after}`,
     );
+    // Tell the GM what happened. Overburdened hides HP as 0 on the sheet,
+    // which made a working nudge look like it did nothing.
+    const who = pc.name || "Their character";
+    const hidden = isOverburdened({ ...pc, hitPoints: after })
+      ? " They're Overburdened, so their sheet shows HP 0 until they aren't."
+      : "";
+    OBR.broadcast.sendMessage(HP_NUDGE_RESULT_KEY, {
+      requestId: nudge.requestId,
+      message: `${who}: HP ${before} -> ${after}${after === before ? " (already at the limit)" : ""}.${hidden}`,
+    });
   });
 }
 
-export async function sendHPNudge(targetPlayerId: string, delta: number, reason: string) {
+// Resolves with the player's answer, or a "didn't answer" note.
+export async function sendHPNudge(targetPlayerId: string, delta: number, reason: string): Promise<string> {
   const fromName = await OBR.player.getName();
-  const nudge: HPNudge = { targetPlayerId, delta, reason, fromName };
-  OBR.broadcast.sendMessage(HP_NUDGE_KEY, nudge);
+  const requestId = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const nudge: HPNudge = { targetPlayerId, delta, reason, fromName, requestId };
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (message: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      unsubscribe();
+      resolve(message);
+    };
+    const unsubscribe = OBR.broadcast.onMessage(HP_NUDGE_RESULT_KEY, ({ data }) => {
+      const reply = data as { requestId?: string; message?: string };
+      if (reply?.requestId === requestId) finish(reply.message ?? "Done.");
+    });
+    const timer = setTimeout(() => finish("Their sheet didn't answer - it has to be open in Owlbear."), 10000);
+    OBR.broadcast.sendMessage(HP_NUDGE_KEY, nudge);
+  });
 }
 
 
@@ -284,23 +312,30 @@ async function initGM() {
     }
   });
 
+  // A player's character lives in whichever save slot THEY have open, which
+  // they publish as `activeSlot`. Using the GM's own slot number here showed
+  // an empty sheet whenever the two differed.
+  const slotFor = (pId: string): number => {
+    if (pId === get(GmId)) return get(CurrentSaveSlot);
+    const published = get(PartyStore).find((p) => p.id === pId)?.metadata[pluginId("activeSlot")];
+    return typeof published === "number" ? published : 1;
+  };
+
   PlayerMetaDataMapStore.subscribe((pmd) => {
-    const slot = get(CurrentSaveSlot);
     const pId = get(TrackedPlayer);
     if (!pId || pId === get(GmId)) return;
-    PlayerCharacterStore.set(withDefaults(pmd[pId]?.[`slot-${slot}`]));
+    PlayerCharacterStore.set(withDefaults(pmd[pId]?.[`slot-${slotFor(pId)}`]));
   });
 
-  CurrentSaveSlot.subscribe((slot) => {
+  CurrentSaveSlot.subscribe(() => {
     const pmd = get(PlayerMetaDataMapStore);
     const pId = get(TrackedPlayer);
-    PlayerCharacterStore.set(withDefaults(pmd[pId]?.[`slot-${slot}`]));
+    PlayerCharacterStore.set(withDefaults(pmd[pId]?.[`slot-${slotFor(pId)}`]));
   });
 
   TrackedPlayer.subscribe((pId) => {
     const pmd = get(PlayerMetaDataMapStore);
-    const slot = get(CurrentSaveSlot);
-    PlayerCharacterStore.set(withDefaults(pmd[pId]?.[`slot-${slot}`]));
+    PlayerCharacterStore.set(withDefaults(pmd[pId]?.[`slot-${slotFor(pId)}`]));
   });
 
 }
@@ -333,6 +368,8 @@ async function initPlayer() {
   CurrentSaveSlot.subscribe((slot) => {
     if (get(isGM) && !get(isTrackedPlayerGM)) return;
 
+    // Lets the GM's Players view open the character this player has open.
+    OBR.player.setMetadata({ [pluginId("activeSlot")]: slot });
     saveSaveSlot(slot);
     const pmd = get(PlayerMetaDataStore);
     PlayerCharacterStore.set(withDefaults(pmd[`slot-${slot}` as const]));

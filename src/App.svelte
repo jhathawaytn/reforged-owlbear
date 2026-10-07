@@ -31,6 +31,7 @@
   import { ShowCharacterCreator } from "./lib/model/CharacterCreatorStore";
   import PlayersView from "./lib/components/PlayersView.svelte";
   import LifeBanner from "./lib/components/LifeBanner.svelte";
+  import GmViewingBar from "./lib/components/GmViewingBar.svelte";
   import { onMount } from "svelte";
   import * as OBRHelper from "./lib/services/OBRHelper";
   import * as LocalStorageSaver from "./lib/services/LocalStorageSaver";
@@ -151,6 +152,7 @@
         </div>
       </div>
     <!-- Mortally Wounded / Clinging / Dead: on every page (V-011). -->
+    <GmViewingBar />
     <LifeBanner />
     {#if $Page === "sheet"}
       <!-- COLUMN 1: attributes, resources, conditions -->
