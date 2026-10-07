@@ -70,6 +70,7 @@ export function defaultPC(): ReforgedCharacter {
     backpackDropped: false,
 
     mortalWound: false,
+    dead: false,
     armorWear: false,
     doomActive: false,
     temperedPending: false,

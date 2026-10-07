@@ -545,6 +545,7 @@ export type ReforgedCharacter = {
   // Damage intake (§13.10, §14.1-14.6) - state that has to persist between
   // hits, not just live inside one Take Damage modal session.
   mortalWound: boolean; // §14.5 - a second qualifying hit before stabilization is instant death
+  dead: boolean; // §14.10 death triggers; GM can undo a mistake (lifeState.ts)
   armorWear: boolean; // Iron Discipline's shared Armor Wear box (§9.5.7) - manually cleared at session end
   doomActive: boolean; // Scar 11 - manually cleared like Armor Wear; a Mortal Wound while active cannot be stabilized
   temperedPending: boolean; // Scar 12 - consumed on the next Level gained (not wired up yet, just recorded)

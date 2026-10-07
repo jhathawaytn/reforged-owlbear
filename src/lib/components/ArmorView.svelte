@@ -37,7 +37,7 @@
   {/if}
 
   <div class="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] mt-1">
-    <label class="flex items-center gap-1 cursor-pointer" title="Dies within one hour unless stabilized (Stabilization isn't modeled - resolve by hand, then clear this). §14.5.">
+    <label class="flex items-center gap-1 cursor-pointer" title="Dies within one hour unless stabilized (§14.5). Set automatically by Take Damage; the GM's Stabilized button on the banner clears it. Tick by hand only to correct a mistake.">
       <input type="checkbox" class="w-auto" bind:checked={$pc.mortalWound} />
       Mortal Wound
     </label>

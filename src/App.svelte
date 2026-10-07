@@ -30,6 +30,7 @@
   import CharacterCreator from "./lib/components/chargen/CharacterCreator.svelte";
   import { ShowCharacterCreator } from "./lib/model/CharacterCreatorStore";
   import PlayersView from "./lib/components/PlayersView.svelte";
+  import LifeBanner from "./lib/components/LifeBanner.svelte";
   import { onMount } from "svelte";
   import * as OBRHelper from "./lib/services/OBRHelper";
   import * as LocalStorageSaver from "./lib/services/LocalStorageSaver";
@@ -89,7 +90,7 @@
 
 <div class="flex items-center justify-center bg-black">
   <main>
-    <div id="sheet" class="bg-black min-w-[277px] max-w-[1100px] p-1 flex flex-wrap gap-1">
+    <div id="sheet" class="bg-black min-w-[277px] max-w-[1100px] p-1 flex flex-wrap gap-1" class:dead-sheet={$pc.dead}>
       <!-- HEADER: title + buttons, shown on every page -->
       <div class="w-full cell">
         <div class="flex gap-1 justify-around">
@@ -149,6 +150,8 @@
           </div>
         </div>
       </div>
+    <!-- Mortally Wounded / Clinging / Dead: on every page (V-011). -->
+    <LifeBanner />
     {#if $Page === "sheet"}
       <!-- COLUMN 1: attributes, resources, conditions -->
       <div class="flex-[2] min-w-[257px] h-[700px] grid grid-rows-14 grid-cols-2 gap-2">

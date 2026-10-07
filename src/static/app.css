@@ -36,3 +36,16 @@ button,
 .blk-btn {
   @apply bg-black text-white p-1;
 }
+
+/* V-011: Mortally Wounded STR/HP (StatView, HPView) */
+.mortal-wound-stat {
+  color: #b91c1c;
+  border: 2px solid #b91c1c !important;
+  background-color: #fef2f2;
+}
+
+/* V-011: a dead character's sheet is dimmed; the header and banner aren't. */
+.dead-sheet > :not(:first-child):not([role="alert"]) {
+  filter: grayscale(1);
+  opacity: 0.6;
+}

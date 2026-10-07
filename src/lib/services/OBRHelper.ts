@@ -13,6 +13,7 @@ import { initExpeditionRolls } from "./ExpeditionRolls";
 import { initExpeditionDaily } from "./ExpeditionDaily";
 import { initExplorationLight } from "./ExplorationLight";
 import { initStockOperations } from "./StockOperations";
+import { initLifeActions } from "./LifeActions";
 import { sharableStocks } from "../stockRules";
 import type { SharableStock } from "../stockRules";
 
@@ -78,6 +79,7 @@ export async function init() {
     initExpeditionDaily();
     initExplorationLight();
     initStockOperations();
+    initLifeActions();
     await initExpeditionStore();
 
     if (get(isGM)) {
