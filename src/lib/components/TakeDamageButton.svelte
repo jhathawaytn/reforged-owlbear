@@ -1,7 +1,7 @@
 <script lang="ts">
   import Modal from "./Modal.svelte";
   import RollButton from "./RollButton.svelte";
-  import { PlayerCharacterStore as pc, totalArmor, resolveDeflectStep, canUseTechnique, useTechnique } from "../model/ReforgedCharacter";
+  import { PlayerCharacterStore as pc, totalArmor, resolveDeflectStep, canUseTechnique, useTechnique, isOverburdened } from "../model/ReforgedCharacter";
   import { hasArmorProperty, INJURY_SITE_TABLE, SCAR_TABLE, DAMAGE_TYPES } from "../types";
   import type { Attack, DamageType, DieSize, GearItem, InjuryLocation, InjurySeverity } from "../types";
   import { DIE_SIDES } from "../types";
@@ -295,6 +295,19 @@
 
   // ---- HP / STR overflow (§13.10.5-13.10.6, §14.18) ----
   function applyToHP(remaining: number) {
+    // Overburdened (Appendix A): HP counts as 0 and damage strikes STR
+    // directly. The stored HP is left untouched underneath, matching the HP
+    // box, and shows again once the character is no longer Overburdened.
+    if (isOverburdened($pc)) {
+      overflow = remaining;
+      log(`Overburdened: HP counts as 0 (${$pc.hitPoints} kept for later), so all ${remaining} damage strikes STR.`);
+      if (overflow === 0) {
+        phase = "resolved";
+        return;
+      }
+      continueToStr();
+      return;
+    }
     const hp = $pc.hitPoints;
     const newHP = Math.max(0, hp - remaining);
     overflow = Math.max(0, remaining - hp);
@@ -310,6 +323,10 @@
       return;
     }
 
+    continueToStr();
+  }
+
+  function continueToStr() {
     // Edge-Proof (§9.5.4): Slashing/Piercing overflow is reduced by 1 (min
     // 0); doesn't apply when the attack ignores Armor.
     if (!ignoresArmor && (damageType === "Slashing" || damageType === "Piercing")) {
