@@ -214,7 +214,12 @@
       log(
         `Parry lost: attacker's ${parryAttackerRoll} beats your ${parryDefenderRoll}. STR ${strBefore} -> ${newSTR} (ignores Armor/HP, no Critical Save/Mortal Wound/Scar).`,
       );
-      if (newSTR <= 0) log("STR 0 - SLAIN.");
+      // Rules V0.5 gap: Parry damage can't cause a Mortal Wound (§13.7.5), and
+      // §14.6 has no "STR 0 = death" rule for Damage. Don't invent one.
+      if (newSTR <= 0) {
+        log("STR 0 from a Parry: the rules (V0.5) don't say what happens - Parry can't cause a Mortal Wound. GM decides.");
+        notify(`${$pc.name || "A character"} hit STR 0 from a lost Parry - GM decides the outcome.`);
+      }
     } else if (parryAttackerRoll < parryDefenderRoll) {
       log(`Parry won: your ${parryDefenderRoll} beats the attacker's ${parryAttackerRoll}. No damage to you.`);
     } else {
@@ -350,7 +355,7 @@
     $pc.attributes.STR = newSTR;
     log(`STR: ${strBefore} -> ${newSTR}.`);
 
-    // Rules v0.5 §14.6: STR Damage reaching 0 always qualifies as a Mortal
+    // Rules V0.5 §14.6: STR Damage reaching 0 always qualifies as a Mortal
     // Wound (it's at least half current STR) and can still be stabilized -
     // there's no separate "STR 0 = slain" rule for Damage any more.
     if (mortalWoundQualifies) {
@@ -398,7 +403,8 @@
 
   // ---- Scar (§14.2) - HP emptied to exactly 0 with no overflow. Attribute
   // loss here is NOT Damage: no Critical Save, no Mortal Wound, no further
-  // Scar - only reaching STR 0 still resolves as Slain. ----
+  // Scar - STR reaching 0 this way is Attribute Loss: incapacitated, not
+  // dead (§14.6, rules V0.5). ----
   async function rollTheScar() {
     const roll = await rollSingleDie(DIE_SIDES[dieSize]);
     const entry = SCAR_TABLE[roll - 1];
@@ -413,7 +419,8 @@
     $pc.attributes[attr] = after;
     log(`${attr}: ${before} -> ${after} (Scar - not Damage, no Critical Save/Mortal Wound/further Scar).`);
     if (attr === "STR" && after <= 0) {
-      log("STR 0 - SLAIN.");
+      log("STR 0 from a Scar: incapacitated, not dead (§14.6). Stays incapacitated until STR is above 0.");
+      notify(`${$pc.name || "A character"} is incapacitated (STR 0 from a Scar).`);
     }
   }
 
@@ -673,7 +680,7 @@
     {#if phase === "strOverflow"}
       {#if mortalWoundQualifies}
         <button class="bg-black text-white rounded-md px-2 py-1 text-xs" on:click={resolveStrOverflow}>
-          Resolve STR overflow ({overflow >= strBefore ? "Slain" : $pc.doomActive ? "Doom" : $pc.mortalWound ? "2nd Mortal Wound" : "Mortal Wound"})
+          Resolve STR overflow ({$pc.doomActive ? "Doom" : $pc.mortalWound ? "2nd Mortal Wound" : "Mortal Wound"})
         </button>
       {:else}
         <button class="bg-black text-white rounded-md px-2 py-1 text-xs" on:click={resolveStrOverflow}>

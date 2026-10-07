@@ -44,7 +44,7 @@ don't reintroduce a leading `/` in those paths.
 **Owlbear caches extension iframes hard.** The Sep 27-28 work added three layers to make
 players actually get a new build:
 - The manifest's `popover` points at `app.html?build=NNN`. Bump `NNN` on each user-visible
-  release (`037` at 0.1.27).
+  release (`038` at 0.1.28).
 - `public/loader.html` + `dist/app-assets.json` (the deploy workflow writes it after the build)
   let a stable loader page pick up the newest hashed assets without leaving the Owlbear iframe.
 - Versioned manifests (`public/manifest-v016.json`, `manifest-v017.json`, ...) give testers a
@@ -122,11 +122,20 @@ in response to a broadcast request from the GM (same trust model as the HP nudge
   state; dungeon camp, sleep quarter, camp preparation, meals and watches, with a
   Quiet Night / Rough Night / Camp Disaster result.
 
-Current version: **0.1.27** (popover `build=037`).
+Current version: **0.1.28** (popover `build=038`).
 
 **Rules source moved on:** Jason's current rules text is `PLAYTEST_1_V0.5.md` (in
 `Downloads\Share with Claude\playtest_1\`), newer than the `docs/PLAYTEST_1_v0.4.pdf` in this
-repo. Check v0.5 first when a rule matters.
+repo. Check v0.5 first when a rule matters. **`PLAYTEST_1_V0.5.md` is THE rules (Jason, Oct 6).** A stray
+`PLAYTEST_1_ASSEMBLY_v0.6.md` (Sep 15) disagreed with it (e.g. STR 0 = Slain) and was moved to
+`playtest_1\old\`; never use it.
+
+**0.1.28 (Oct 6): STR 0 wording per rules V0.5 §14.6.** (A PR #23 that made STR 0 = Slain from
+the stray v0.6 file was closed.) Damage to STR 0 stays a stabilizable Mortal Wound (0.1.25).
+A **Scar** taking STR to 0 now says "incapacitated, not dead" (it said SLAIN). The STR-overflow
+button no longer says "Slain". A **lost Parry** taking STR to 0 is a V0.5 gap (Parry can't cause
+a Mortal Wound; §14.6 has no STR-0 death for Damage), so the sheet says "GM decides" and tells
+the room; flagged to Jason for the book.
 
 **0.1.27 (Oct 6): GM Players view fixes.** Jason couldn't view player sheets and the HP nudge seemed dead.
 - **Wrong slot:** the GM's view of a player used the GM's OWN save-slot number, so a player on
