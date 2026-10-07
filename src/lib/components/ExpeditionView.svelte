@@ -83,14 +83,18 @@
     type ExplorationLightDeclaration,
   } from "../services/ExplorationLight";
   import { newId } from "../utils";
-  import { CampaignStore, updateCampaign } from "../model/CampaignStore";
   import {
-    addRoute,
+    KnownRoutesStore,
+    RouteSceneReadyStore,
+    addKnownRoute,
+    deleteKnownRoute,
+    updateKnownRoute,
+  } from "../services/KnownRouteLabels";
+  import {
     defaultRouteName,
     destinationsFrom,
-    removeRoute,
+    normalizeRoute,
     routesBetween,
-    updateRoute,
     validateRoute,
     type KnownRouteRecord,
     type NewKnownRoute,
@@ -211,7 +215,7 @@
   let editingRouteId = "";
   let routeEdit: NewKnownRoute = { name: "", from: "", to: "", quarters: 1, bothWays: true, notes: "" };
   let routeEditError = "";
-  $: knownRoutes = $CampaignStore.knownRoutes;
+  $: knownRoutes = $KnownRoutesStore;
   $: matchingKnownRoutes = routesBetween(
     knownRoutes,
     $expedition.wilderness.currentLocation,
@@ -1618,21 +1622,22 @@
       : `Arrived at ${arrivedAt}. Enter a new destination to begin the next leg.`;
   }
 
-  function routeId(): string {
-    return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}_${Math.random()}`;
-  }
-
   async function saveRouteDraft() {
     if (!$isGM || !routeDraft) return;
-    const draft = { ...routeDraft, quarters: Math.floor(Number(routeDraft.quarters)) };
-    const problem = validateRoute(draft);
+    const draft = normalizeRoute(routeDraft);
+    const problem = validateRoute(draft) ?? (!$RouteSceneReadyStore ? "Open the scene with your travel map first: the route is saved as a label on it." : null);
     if (problem) {
       routeDraftError = problem;
       return;
     }
-    await updateCampaign((campaign) => ({ ...campaign, knownRoutes: addRoute(campaign.knownRoutes, draft, routeId()) }));
+    try {
+      await addKnownRoute(draft);
+    } catch (error) {
+      routeDraftError = `Couldn't add the label to the map: ${error instanceof Error ? error.message : error}`;
+      return;
+    }
     if (routeDraftMode === "graduation") await patchWilderness({ pendingKnownRoute: null });
-    quarterMessage = `Known Route recorded: ${draft.name.trim() || defaultRouteName(draft.from, draft.to)}, ${draft.quarters} Quarter${draft.quarters === 1 ? "" : "s"}.`;
+    quarterMessage = `Known Route recorded: ${draft.name}, ${draft.quarters} Quarter${draft.quarters === 1 ? "" : "s"}. Its label is in the middle of your map view - drag it onto the route.`;
     routeDraft = null;
     routeDraftError = "";
   }
@@ -1667,29 +1672,19 @@
 
   async function saveRouteEdit() {
     if (!$isGM || !editingRouteId) return;
-    const edit = { ...routeEdit, quarters: Math.floor(Number(routeEdit.quarters)) };
+    const edit = normalizeRoute(routeEdit);
     const problem = validateRoute(edit);
     if (problem) {
       routeEditError = problem;
       return;
     }
-    const id = editingRouteId;
-    await updateCampaign((campaign) => ({
-      ...campaign,
-      knownRoutes: updateRoute(campaign.knownRoutes, id, {
-        ...edit,
-        name: edit.name.trim() || defaultRouteName(edit.from, edit.to),
-        from: edit.from.trim(),
-        to: edit.to.trim(),
-        notes: edit.notes.trim(),
-      }),
-    }));
+    await updateKnownRoute(editingRouteId, edit);
     editingRouteId = "";
   }
 
   async function deleteRoute(route: KnownRouteRecord) {
     if (!$isGM) return;
-    await updateCampaign((campaign) => ({ ...campaign, knownRoutes: removeRoute(campaign.knownRoutes, route.id) }));
+    await deleteKnownRoute(route.id);
     if (editingRouteId === route.id) editingRouteId = "";
     quarterMessage = `${route.name} removed: that path is Unmapped Country again.`;
   }
@@ -3360,9 +3355,14 @@
             {/if}
 
             <details class="mt-2 border rounded-md bg-white px-2 py-1.5 text-[10px]">
-              <summary class="font-bold cursor-pointer">Known Routes ({knownRoutes.length})</summary>
-              {#if !knownRoutes.length}
-                <div class="text-gray-500 mt-1">None recorded yet.</div>
+              <summary class="font-bold cursor-pointer">Known Routes on this map ({knownRoutes.length})</summary>
+              <div class="text-[9px] text-gray-500 mt-1">
+                Each route is a label on the current Owlbear scene. Drag the label wherever you like; deleting the label from the map deletes the route.
+              </div>
+              {#if !$RouteSceneReadyStore}
+                <div class="text-gray-500 mt-1">Open the scene with your travel map to see its Known Routes.</div>
+              {:else if !knownRoutes.length}
+                <div class="text-gray-500 mt-1">None recorded on this map yet.</div>
               {/if}
               {#each knownRoutes as route (route.id)}
                 <div class="border-t mt-1 pt-1">

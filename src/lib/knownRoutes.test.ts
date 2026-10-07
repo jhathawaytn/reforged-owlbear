@@ -1,18 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
-
-// CampaignStore imports the Owlbear SDK, which reads `window` at import time.
-vi.mock("@owlbear-rodeo/sdk", () => ({ default: {} }));
+import { describe, expect, it } from "vitest";
 import {
-  addRoute,
   defaultRouteName,
   destinationsFrom,
-  removeRoute,
+  normalizeRoute,
+  routeFromMetadata,
+  routeLabelText,
   routesBetween,
-  updateRoute,
   validateRoute,
 } from "./knownRoutes";
 import type { KnownRouteRecord, NewKnownRoute } from "./knownRoutes";
-import { campaignStateWithDefaults } from "./model/CampaignStore";
 
 const draft = (over: Partial<NewKnownRoute> = {}): NewKnownRoute => ({
   name: "",
@@ -24,12 +20,18 @@ const draft = (over: Partial<NewKnownRoute> = {}): NewKnownRoute => ({
   ...over,
 });
 
+const route = (id: string, over: Partial<NewKnownRoute> = {}): KnownRouteRecord => ({ id, ...normalizeRoute(draft(over)) });
+
 describe("recording a Known Route", () => {
   it("fills in a default name and trims", () => {
-    const routes = addRoute([], draft({ from: "  Hamlet ", notes: " ford above the mill " }), "r1");
-    expect(routes).toEqual([
-      { id: "r1", name: "Hamlet - Golden Boar", from: "Hamlet", to: "Golden Boar", quarters: 3, bothWays: true, notes: "ford above the mill" },
-    ]);
+    expect(normalizeRoute(draft({ from: "  Hamlet ", notes: " ford above the mill " }))).toEqual({
+      name: "Hamlet - Golden Boar",
+      from: "Hamlet",
+      to: "Golden Boar",
+      quarters: 3,
+      bothWays: true,
+      notes: "ford above the mill",
+    });
     expect(defaultRouteName("", "X")).toBe("? - X");
   });
   it("rejects missing places, the same place twice, and less than 1 Quarter", () => {
@@ -39,13 +41,31 @@ describe("recording a Known Route", () => {
     expect(validateRoute(draft({ quarters: 0 }))).toBe("Recorded Route Time must be at least 1 Quarter.");
     expect(validateRoute(draft({ quarters: 1.5 }))).not.toBeNull();
   });
+  it("label text shows name, time, and one-way routes", () => {
+    expect(routeLabelText(normalizeRoute(draft({ name: "Mill road" })))).toBe("Mill road · 3 Quarters");
+    expect(routeLabelText(normalizeRoute(draft({ name: "River", quarters: 1, bothWays: false })))).toBe("River · 1 Quarter (one way)");
+  });
+});
+
+describe("reading routes back from map labels", () => {
+  it("round-trips what was stored", () => {
+    const stored = normalizeRoute(draft({ name: "Mill road", notes: "n" }));
+    expect(routeFromMetadata("label-1", stored)).toEqual({ id: "label-1", ...stored });
+  });
+  it("ignores labels that aren't routes, and fills fields added later", () => {
+    expect(routeFromMetadata("x", undefined)).toBeNull();
+    expect(routeFromMetadata("x", { from: "A" })).toBeNull();
+    expect(routeFromMetadata("x", { from: "A", to: "B", quarters: 2 })).toEqual({
+      id: "x", name: "A - B", from: "A", to: "B", quarters: 2, bothWays: true, notes: "",
+    });
+  });
 });
 
 describe("finding recorded routes", () => {
-  const routes: KnownRouteRecord[] = [
-    ...addRoute([], draft({ name: "Mill road" }), "a"),
-    ...addRoute([], draft({ name: "Ridge path", quarters: 5 }), "b"),
-    ...addRoute([], draft({ name: "River (downstream only)", from: "Golden Boar", to: "Dunmere", bothWays: false }), "c"),
+  const routes = [
+    route("a", { name: "Mill road" }),
+    route("b", { name: "Ridge path", quarters: 5 }),
+    route("c", { name: "River", from: "Golden Boar", to: "Dunmere", bothWays: false }),
   ];
   it("ignores case and spacing", () => {
     expect(routesBetween(routes, "hamlet", "golden  boar").map((r) => r.id)).toEqual(["a", "b"]);
@@ -63,26 +83,9 @@ describe("finding recorded routes", () => {
   it("lists destinations reachable from a place", () => {
     expect(destinationsFrom(routes, "Golden Boar")).toEqual(["Dunmere", "Hamlet"]);
     expect(destinationsFrom(routes, "Dunmere")).toEqual([]);
-    expect(destinationsFrom(routes, "")).toEqual([]);
   });
   it("blank places never match", () => {
     expect(routesBetween(routes, "", "")).toEqual([]);
-  });
-});
-
-describe("editing the ledger", () => {
-  const routes = addRoute([], draft(), "a");
-  it("rename / re-time", () => {
-    expect(updateRoute(routes, "a", { name: "Old road", quarters: 4 })[0]).toMatchObject({ name: "Old road", quarters: 4 });
-  });
-  it("delete (route destroyed, §11.1.5)", () => {
-    expect(removeRoute(routes, "a")).toEqual([]);
-  });
-  it("loads saved campaign data, filling fields added later", () => {
-    const loaded = campaignStateWithDefaults({
-      knownRoutes: [{ id: "x", name: "N", from: "A", to: "B", quarters: 2 } as KnownRouteRecord],
-    });
-    expect(loaded.knownRoutes[0]).toMatchObject({ bothWays: true, notes: "" });
-    expect(campaignStateWithDefaults(undefined)).toEqual({ knownRoutes: [] });
+    expect(destinationsFrom(routes, "")).toEqual([]);
   });
 });

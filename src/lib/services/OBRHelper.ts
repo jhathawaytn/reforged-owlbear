@@ -9,7 +9,7 @@ import { CurrentSaveSlot, NUM_SLOTS } from "./SaveSlotTracker";
 import type { ReforgedCharacter } from "../types";
 import { NOTIFICATION_KEY, showPopover } from "./Notifier";
 import { initExpeditionStore } from "../model/ExpeditionStore";
-import { initCampaignStore } from "../model/CampaignStore";
+import { initKnownRouteLabels } from "./KnownRouteLabels";
 import { initExpeditionRolls } from "./ExpeditionRolls";
 import { initExpeditionDaily } from "./ExpeditionDaily";
 import { initExplorationLight } from "./ExplorationLight";
@@ -80,7 +80,7 @@ export async function init() {
     initExplorationLight();
     initStockOperations();
     await initExpeditionStore();
-    await initCampaignStore();
+    initKnownRouteLabels();
 
     if (get(isGM)) {
       initGM();

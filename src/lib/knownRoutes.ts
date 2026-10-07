@@ -1,9 +1,11 @@
-// Known Route ledger (§11.1, V-006). Known Routes outlive any one trip, so
-// they live in the campaign record (model/CampaignStore.ts), not in the
-// Expedition state that Arrival wipes. Pure functions only; tested.
+// Known Routes (§11.1, V-006). Each route is a label on the Owlbear map, and
+// the route's details live in that label's own metadata - "write it on the
+// Company's map" taken literally. Per-item storage means a hex crawl with
+// a hundred routes never touches the room's small shared metadata. The
+// plumbing is services/KnownRouteLabels.ts; this file is pure and tested.
 
 export type KnownRouteRecord = {
-  id: string;
+  id: string; // the map label's item id
   name: string;
   from: string;
   to: string;
@@ -49,34 +51,42 @@ export function destinationsFrom(routes: KnownRouteRecord[], from: string): stri
   return [...out.values()].sort((a, b) => a.localeCompare(b));
 }
 
-export type RouteProblem = string | null;
-
-export function validateRoute(route: NewKnownRoute): RouteProblem {
+export function validateRoute(route: NewKnownRoute): string | null {
   if (!route.from.trim() || !route.to.trim()) return "Enter both places.";
   if (samePlace(route.from, route.to)) return "A route needs two different places.";
   if (!Number.isInteger(route.quarters) || route.quarters < 1) return "Recorded Route Time must be at least 1 Quarter.";
   return null;
 }
 
-export function addRoute(routes: KnownRouteRecord[], route: NewKnownRoute, id: string): KnownRouteRecord[] {
-  return [
-    ...routes,
-    {
-      ...route,
-      id,
-      name: route.name.trim() || defaultRouteName(route.from, route.to),
-      from: route.from.trim(),
-      to: route.to.trim(),
-      notes: route.notes.trim(),
-    },
-  ];
+// Trim and fill the default name - what actually gets stored on the label.
+export function normalizeRoute(route: NewKnownRoute): NewKnownRoute {
+  return {
+    name: route.name.trim() || defaultRouteName(route.from, route.to),
+    from: route.from.trim(),
+    to: route.to.trim(),
+    quarters: Math.floor(Number(route.quarters)),
+    bothWays: route.bothWays,
+    notes: route.notes.trim(),
+  };
 }
 
-export function updateRoute(routes: KnownRouteRecord[], id: string, patch: Partial<NewKnownRoute>): KnownRouteRecord[] {
-  return routes.map((route) => (route.id === id ? { ...route, ...patch } : route));
+// What the map label says.
+export function routeLabelText(route: NewKnownRoute): string {
+  return `${route.name} · ${route.quarters} Quarter${route.quarters === 1 ? "" : "s"}${route.bothWays ? "" : " (one way)"}`;
 }
 
-// §11.1.5: a route destroyed or made unrecognizable reverts to Unmapped Country.
-export function removeRoute(routes: KnownRouteRecord[], id: string): KnownRouteRecord[] {
-  return routes.filter((route) => route.id !== id);
+// Read a label's stored route; anything malformed is ignored.
+export function routeFromMetadata(id: string, raw: unknown): KnownRouteRecord | null {
+  if (!raw || typeof raw !== "object") return null;
+  const data = raw as Partial<NewKnownRoute>;
+  if (typeof data.from !== "string" || typeof data.to !== "string" || typeof data.quarters !== "number") return null;
+  return {
+    id,
+    name: typeof data.name === "string" && data.name ? data.name : defaultRouteName(data.from, data.to),
+    from: data.from,
+    to: data.to,
+    quarters: data.quarters,
+    bothWays: data.bothWays ?? true,
+    notes: typeof data.notes === "string" ? data.notes : "",
+  };
 }

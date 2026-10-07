@@ -128,21 +128,28 @@ Current version: **0.1.25** (popover `build=035`).
 `Downloads\Share with Claude\playtest_1\`), newer than the `docs/PLAYTEST_1_v0.4.pdf` in this
 repo. Check v0.5 first when a rule matters.
 
-**0.1.25 (Oct 6): Batch 6 = V-006 + V-003, Known Route ledger + route notes.**
-- New **campaign record** (review B2): `model/CampaignStore.ts`, room metadata key
-  `.../campaign`, GM writes / everyone reads. For things that outlive a trip (Arrival wipes
-  Expedition state). Holds `knownRoutes` now; the V-016 treasure ledger can go here later.
+**0.1.25 (Oct 6): Batch 6 = V-006 + V-003, Known Routes as map labels + route notes.**
+- **Each Known Route is a Label item on the current Owlbear scene**, with the route stored in
+  that item's metadata (`rodeo.owlbear.reforged-sheet/known-route`). Jason's call: room
+  metadata is small (~16 KB for the whole room, shared with the Expedition state), and a hex
+  crawl could hold a hundred routes; per-item metadata doesn't share that budget. Routes belong
+  to the scene they're on. Deleting the label on the map deletes the route (§11.1.5).
+  `services/KnownRouteLabels.ts` reads them (scene ready + items onChange → `KnownRoutesStore`)
+  and adds/updates/deletes labels (new labels appear mid-view; the GM drags them onto the route).
+  A room-wide "campaign record" was tried first and dropped for this reason; don't put
+  growing lists in room metadata.
 - `knownRoutes.ts` (+ tests): record shape (name, from, to, `quarters` = Recorded Route Time,
   `bothWays`, notes), `routesBetween` (case/space-insensitive; two-way routes match in
-  reverse, so the return trip works immediately), `destinationsFrom`, `validateRoute`.
+  reverse, so the return trip works immediately), `destinationsFrom`, `validateRoute`,
+  `normalizeRoute`, `routeLabelText`, `routeFromMetadata`.
 - **Arrival on Unmapped Country** (no route already on record) sets
-  `wilderness.pendingKnownRoute`; the GM sees **Record Known Route?** (From/To/Name/Quarters/
-  Notes/both directions) or **Skip (stays Unmapped)**. Per §11.1.3 + §11.3 the time is entered
-  once from the route-time table, NOT copied from how long the trip took.
+  `wilderness.pendingKnownRoute` (small, room state); the GM sees **Record Known Route?**
+  (From/To/Name/Quarters/Notes/both directions) or **Skip (stays Unmapped)**. Per §11.1.3 +
+  §11.3 the time is entered once from the route-time table, NOT copied from the trip length.
 - Journey setup: destination input suggests places with a recorded route from the origin;
   matching routes show **Use this route** (switches to Known Route with the recorded time; the
-  GM still confirms the Route). **Known Routes** list (everyone sees; GM can Edit, Delete =
-  route destroyed §11.1.5, and **+ Add Known Route** for the Hamlet's familiar roads §11.1.4).
+  GM still confirms the Route). **Known Routes on this map** list (everyone sees; GM can Edit,
+  Delete, and **+ Add Known Route** for the Hamlet's familiar roads §11.1.4).
 - **V-003:** `wilderness.routeNotes`, a GM text box shown on Unmapped Country. Information only
   (M-002 / DD-002). Cleared on Arrival but carried into the Record Known Route notes.
 
