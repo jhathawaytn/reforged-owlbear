@@ -3688,10 +3688,17 @@
           <div class="flex flex-col gap-2">
             {#each company as p (p.id)}
               {@const assignment = assignmentFor(p.id)}
-              <div class="border rounded-md p-2 text-xs">
+              {@const isMe = !$isGM && p.id === $CurrentPlayerId}
+              <!-- A player's own box stands out from the rest of the Company. -->
+              <div
+                class="rounded-md p-2 text-xs {isMe ? 'border-2 border-black bg-amber-50' : 'border'}"
+              >
                 <div class="font-bold flex items-center gap-1 mb-1">
                   <i class="material-icons text-sm">{p.source === "npc" ? "badge" : "person"}</i>
                   <span class="truncate">{p.name}</span>
+                  {#if isMe}
+                    <span class="bg-black text-white rounded px-1 text-[9px]">You</span>
+                  {/if}
                   {#if p.npc}
                     <span class="role-chip">{p.npc.kind}</span>
                     {#if p.npc.fatigue}
