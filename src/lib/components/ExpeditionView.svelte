@@ -83,6 +83,18 @@
     type ExplorationLightDeclaration,
   } from "../services/ExplorationLight";
   import { newId } from "../utils";
+  import { CampaignStore, updateCampaign } from "../model/CampaignStore";
+  import {
+    addRoute,
+    defaultRouteName,
+    destinationsFrom,
+    removeRoute,
+    routesBetween,
+    updateRoute,
+    validateRoute,
+    type KnownRouteRecord,
+    type NewKnownRoute,
+  } from "../knownRoutes";
 
   type TravelWorkflowStep =
     | "climate"
@@ -190,6 +202,36 @@
   let waterPicks: Record<string, Record<string, boolean>> = {};
   let resourceBusy: Record<string, boolean> = {};
   let resourceMessage = "";
+  // Known Route ledger (V-006). `routeDraft` is the record-on-arrival form
+  // and the "+ Add Known Route" form; `editingRouteId` is a ledger row being
+  // edited (its values live in `routeEdit`).
+  let routeDraft: NewKnownRoute | null = null;
+  let routeDraftMode: "graduation" | "manual" = "manual";
+  let routeDraftError = "";
+  let editingRouteId = "";
+  let routeEdit: NewKnownRoute = { name: "", from: "", to: "", quarters: 1, bothWays: true, notes: "" };
+  let routeEditError = "";
+  $: knownRoutes = $CampaignStore.knownRoutes;
+  $: matchingKnownRoutes = routesBetween(
+    knownRoutes,
+    $expedition.wilderness.currentLocation,
+    $expedition.wilderness.destination,
+  );
+  $: knownDestinations = destinationsFrom(knownRoutes, $expedition.wilderness.currentLocation);
+  // Open the record form whenever an Unmapped Arrival is waiting on the GM.
+  $: pendingKnownRoute = $expedition.wilderness.pendingKnownRoute;
+  $: if ($isGM && pendingKnownRoute && !(routeDraft && routeDraftMode === "graduation")) {
+    routeDraftMode = "graduation";
+    routeDraftError = "";
+    routeDraft = {
+      name: defaultRouteName(pendingKnownRoute.from, pendingKnownRoute.to),
+      from: pendingKnownRoute.from,
+      to: pendingKnownRoute.to,
+      quarters: 1,
+      bothWays: true,
+      notes: pendingKnownRoute.notes,
+    };
+  }
   let restAttributeChoice: Attribute = "STR";
   let manualRestQuality: RestQuality = "Perilous";
   const pendingConsumptionIds = new Set<string>();
@@ -1543,6 +1585,12 @@
     if (!$isGM || !arrivalCanBeRecorded) return;
 
     const arrivedAt = $expedition.wilderness.destination.trim();
+    const origin = $expedition.wilderness.currentLocation.trim();
+    // §11.1.3: a successful Unmapped journey may graduate to a Known Route.
+    // Optional - the GM records it or skips it.
+    const graduates =
+      $expedition.wilderness.routeMode === "Unmapped Country" &&
+      routesBetween(knownRoutes, origin, arrivedAt).length === 0;
     clearQuarterPlan();
     watchTask = null;
     watchMessage = "";
@@ -1561,9 +1609,106 @@
       ...resetKnownRouteEventState(),
       assignments: [],
       makeCampLeaderId: "",
+      routeNotes: "",
+      pendingKnownRoute: graduates ? { from: origin, to: arrivedAt, notes: $expedition.wilderness.routeNotes.trim() } : null,
     });
 
-    quarterMessage = `Arrived at ${arrivedAt}. Enter a new destination to begin the next leg.`;
+    quarterMessage = graduates
+      ? `Arrived at ${arrivedAt}. Record the route as a Known Route below if someone in the Company noted it, or skip.`
+      : `Arrived at ${arrivedAt}. Enter a new destination to begin the next leg.`;
+  }
+
+  function routeId(): string {
+    return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}_${Math.random()}`;
+  }
+
+  async function saveRouteDraft() {
+    if (!$isGM || !routeDraft) return;
+    const draft = { ...routeDraft, quarters: Math.floor(Number(routeDraft.quarters)) };
+    const problem = validateRoute(draft);
+    if (problem) {
+      routeDraftError = problem;
+      return;
+    }
+    await updateCampaign((campaign) => ({ ...campaign, knownRoutes: addRoute(campaign.knownRoutes, draft, routeId()) }));
+    if (routeDraftMode === "graduation") await patchWilderness({ pendingKnownRoute: null });
+    quarterMessage = `Known Route recorded: ${draft.name.trim() || defaultRouteName(draft.from, draft.to)}, ${draft.quarters} Quarter${draft.quarters === 1 ? "" : "s"}.`;
+    routeDraft = null;
+    routeDraftError = "";
+  }
+
+  async function cancelRouteDraft() {
+    if (routeDraftMode === "graduation") {
+      await patchWilderness({ pendingKnownRoute: null });
+      quarterMessage = "Route not recorded; it stays Unmapped Country.";
+    }
+    routeDraft = null;
+    routeDraftError = "";
+  }
+
+  function startManualRoute() {
+    routeDraftMode = "manual";
+    routeDraftError = "";
+    routeDraft = {
+      name: "",
+      from: $expedition.wilderness.currentLocation.trim(),
+      to: "",
+      quarters: 1,
+      bothWays: true,
+      notes: "",
+    };
+  }
+
+  function startEditRoute(route: KnownRouteRecord) {
+    editingRouteId = route.id;
+    routeEditError = "";
+    routeEdit = { name: route.name, from: route.from, to: route.to, quarters: route.quarters, bothWays: route.bothWays, notes: route.notes };
+  }
+
+  async function saveRouteEdit() {
+    if (!$isGM || !editingRouteId) return;
+    const edit = { ...routeEdit, quarters: Math.floor(Number(routeEdit.quarters)) };
+    const problem = validateRoute(edit);
+    if (problem) {
+      routeEditError = problem;
+      return;
+    }
+    const id = editingRouteId;
+    await updateCampaign((campaign) => ({
+      ...campaign,
+      knownRoutes: updateRoute(campaign.knownRoutes, id, {
+        ...edit,
+        name: edit.name.trim() || defaultRouteName(edit.from, edit.to),
+        from: edit.from.trim(),
+        to: edit.to.trim(),
+        notes: edit.notes.trim(),
+      }),
+    }));
+    editingRouteId = "";
+  }
+
+  async function deleteRoute(route: KnownRouteRecord) {
+    if (!$isGM) return;
+    await updateCampaign((campaign) => ({ ...campaign, knownRoutes: removeRoute(campaign.knownRoutes, route.id) }));
+    if (editingRouteId === route.id) editingRouteId = "";
+    quarterMessage = `${route.name} removed: that path is Unmapped Country again.`;
+  }
+
+  // Follow a recorded route: Known Route procedure with its recorded time.
+  async function useKnownRoute(route: KnownRouteRecord) {
+    if (!$isGM) return;
+    clearQuarterPlan();
+    await patchWilderness({
+      routeMode: "Known Route",
+      routeTimeQuarters: route.quarters,
+      routeConfirmedDay: 0,
+      weatherRolledDay: 0,
+      paceDeclaredDay: 0,
+      weather: "Not rolled",
+      weatherExtremeCandidate: "",
+      ...resetKnownRouteEventState(),
+    });
+    quarterMessage = `Using Known Route ${route.name} (${route.quarters} recorded Quarters). Confirm the Route to continue.`;
   }
 
   async function resetTravel() {
@@ -3094,9 +3239,48 @@
                 value={$expedition.wilderness.destination}
                 placeholder="Destination"
                 aria-label="Journey destination"
+                list="known-route-destinations"
                 on:change={onDestinationChange}
               />
+              <datalist id="known-route-destinations">
+                {#each knownDestinations as place}<option value={place} />{/each}
+              </datalist>
             </div>
+
+            {#if matchingKnownRoutes.length}
+              <div class="mt-2 border rounded-md bg-white px-2 py-1.5 text-[10px]">
+                <div class="font-bold">Known Route on record</div>
+                {#each matchingKnownRoutes as route (route.id)}
+                  <div class="flex items-center gap-2 mt-0.5">
+                    <span>{route.name} · {route.quarters} Quarter{route.quarters === 1 ? "" : "s"}{route.notes ? ` · ${route.notes}` : ""}</span>
+                    {#if $isGM}
+                      {#if $expedition.wilderness.routeMode === "Known Route" && $expedition.wilderness.routeTimeQuarters === route.quarters}
+                        <span class="ml-auto text-gray-500">In use</span>
+                      {:else}
+                        <button class="ml-auto border rounded px-2 py-0.5" on:click={() => useKnownRoute(route)}>Use this route</button>
+                      {/if}
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            {/if}
+
+            {#if $expedition.wilderness.routeMode === "Unmapped Country"}
+              <label class="block mt-2 text-[10px]">
+                Route notes / estimate
+                <textarea
+                  rows="2"
+                  class="w-full text-xs"
+                  disabled={!$isGM}
+                  value={$expedition.wilderness.routeNotes}
+                  placeholder="Map, rumor, or guide estimate, e.g. 'map suggests about 2 days'"
+                  on:change={(e) => patchWilderness({ routeNotes: e.currentTarget.value })}
+                />
+                <span class="text-[9px] text-gray-500">
+                  Information only: doesn't skip Trailblaze, trigger Arrival, or make this a Known Route.
+                </span>
+              </label>
+            {/if}
 
             {#if $expedition.wilderness.routeMode === "Known Route"}
               <label class="block mt-2 max-w-[180px]">
@@ -3144,6 +3328,83 @@
                 </div>
               </div>
             {/if}
+
+            {#if $isGM && routeDraft}
+              <div class="mt-2 border-2 border-emerald-800 rounded-md bg-white px-2 py-1.5 text-[10px]">
+                <div class="font-bold">
+                  {routeDraftMode === "graduation" ? "Record Known Route?" : "Add Known Route"}
+                </div>
+                <div class="text-[9px] text-gray-500">
+                  {routeDraftMode === "graduation"
+                    ? "Only if someone in the Company recorded the way (notes, sketch map, landmarks) - §11.1.3. Work out the Recorded Route Time once from §11.3 (distance + surface + terrain), not from how long this trip took."
+                    : "For routes the Company already knows, e.g. the Hamlet's familiar roads (§11.1.4)."}
+                </div>
+                <div class="grid grid-cols-2 gap-1 mt-1">
+                  <label>From<input bind:value={routeDraft.from} /></label>
+                  <label>To<input bind:value={routeDraft.to} /></label>
+                  <label>Name<input bind:value={routeDraft.name} placeholder={defaultRouteName(routeDraft.from, routeDraft.to)} /></label>
+                  <label>Recorded Route Time (Quarters)<input type="number" min="1" bind:value={routeDraft.quarters} /></label>
+                </div>
+                <label class="block mt-1">Notes<input bind:value={routeDraft.notes} placeholder="Landmarks, hazards, the ford above the mill" /></label>
+                <label class="flex items-center gap-1 mt-1">
+                  <input type="checkbox" class="w-auto" bind:checked={routeDraft.bothWays} /> Usable in both directions
+                </label>
+                {#if routeDraftError}<div class="text-red-700 font-bold mt-1">{routeDraftError}</div>{/if}
+                <div class="flex gap-1 mt-1">
+                  <button class="bg-emerald-800 text-white rounded px-2 py-0.5" on:click={saveRouteDraft}>Record Known Route</button>
+                  <button class="border rounded px-2 py-0.5" on:click={cancelRouteDraft}>
+                    {routeDraftMode === "graduation" ? "Skip (stays Unmapped)" : "Cancel"}
+                  </button>
+                </div>
+              </div>
+            {/if}
+
+            <details class="mt-2 border rounded-md bg-white px-2 py-1.5 text-[10px]">
+              <summary class="font-bold cursor-pointer">Known Routes ({knownRoutes.length})</summary>
+              {#if !knownRoutes.length}
+                <div class="text-gray-500 mt-1">None recorded yet.</div>
+              {/if}
+              {#each knownRoutes as route (route.id)}
+                <div class="border-t mt-1 pt-1">
+                  {#if editingRouteId === route.id}
+                    <div class="grid grid-cols-2 gap-1">
+                      <label>From<input bind:value={routeEdit.from} /></label>
+                      <label>To<input bind:value={routeEdit.to} /></label>
+                      <label>Name<input bind:value={routeEdit.name} /></label>
+                      <label>Quarters<input type="number" min="1" bind:value={routeEdit.quarters} /></label>
+                    </div>
+                    <label class="block mt-1">Notes<input bind:value={routeEdit.notes} /></label>
+                    <label class="flex items-center gap-1 mt-1">
+                      <input type="checkbox" class="w-auto" bind:checked={routeEdit.bothWays} /> Usable in both directions
+                    </label>
+                    {#if routeEditError}<div class="text-red-700 font-bold">{routeEditError}</div>{/if}
+                    <div class="flex gap-1 mt-1">
+                      <button class="bg-black text-white rounded px-2 py-0.5" on:click={saveRouteEdit}>Save</button>
+                      <button class="border rounded px-2 py-0.5" on:click={() => (editingRouteId = "")}>Cancel</button>
+                    </div>
+                  {:else}
+                    <div class="flex items-center gap-2">
+                      <span class="font-bold">{route.name}</span>
+                      <span class="text-gray-500">{route.from} {route.bothWays ? "<->" : "->"} {route.to} · {route.quarters} Quarter{route.quarters === 1 ? "" : "s"}</span>
+                      {#if $isGM}
+                        <button class="ml-auto border rounded px-1" on:click={() => startEditRoute(route)}>Edit</button>
+                        <button
+                          class="border border-red-300 text-red-800 rounded px-1"
+                          title="The route was destroyed or made unrecognizable (§11.1.5): it becomes Unmapped Country again."
+                          on:click={() => deleteRoute(route)}
+                        >
+                          Delete
+                        </button>
+                      {/if}
+                    </div>
+                    {#if route.notes}<div class="text-gray-500">{route.notes}</div>{/if}
+                  {/if}
+                </div>
+              {/each}
+              {#if $isGM && !routeDraft}
+                <button class="border rounded px-2 py-0.5 mt-1" on:click={startManualRoute}>+ Add Known Route</button>
+              {/if}
+            </details>
 
             {#if $isGM}
               <div class="flex flex-wrap gap-1 mt-2 pt-2 border-t">

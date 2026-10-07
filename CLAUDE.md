@@ -44,7 +44,7 @@ don't reintroduce a leading `/` in those paths.
 **Owlbear caches extension iframes hard.** The Sep 27-28 work added three layers to make
 players actually get a new build:
 - The manifest's `popover` points at `app.html?build=NNN`. Bump `NNN` on each user-visible
-  release (`034` at 0.1.24).
+  release (`035` at 0.1.25).
 - `public/loader.html` + `dist/app-assets.json` (the deploy workflow writes it after the build)
   let a stable loader page pick up the newest hashed assets without leaving the Owlbear iframe.
 - Versioned manifests (`public/manifest-v016.json`, `manifest-v017.json`, ...) give testers a
@@ -122,11 +122,29 @@ in response to a broadcast request from the GM (same trust model as the HP nudge
   state; dungeon camp, sleep quarter, camp preparation, meals and watches, with a
   Quiet Night / Rough Night / Camp Disaster result.
 
-Current version: **0.1.24** (popover `build=034`).
+Current version: **0.1.25** (popover `build=035`).
 
 **Rules source moved on:** Jason's current rules text is `PLAYTEST_1_V0.5.md` (in
 `Downloads\Share with Claude\playtest_1\`), newer than the `docs/PLAYTEST_1_v0.4.pdf` in this
 repo. Check v0.5 first when a rule matters.
+
+**0.1.25 (Oct 6): Batch 6 = V-006 + V-003, Known Route ledger + route notes.**
+- New **campaign record** (review B2): `model/CampaignStore.ts`, room metadata key
+  `.../campaign`, GM writes / everyone reads. For things that outlive a trip (Arrival wipes
+  Expedition state). Holds `knownRoutes` now; the V-016 treasure ledger can go here later.
+- `knownRoutes.ts` (+ tests): record shape (name, from, to, `quarters` = Recorded Route Time,
+  `bothWays`, notes), `routesBetween` (case/space-insensitive; two-way routes match in
+  reverse, so the return trip works immediately), `destinationsFrom`, `validateRoute`.
+- **Arrival on Unmapped Country** (no route already on record) sets
+  `wilderness.pendingKnownRoute`; the GM sees **Record Known Route?** (From/To/Name/Quarters/
+  Notes/both directions) or **Skip (stays Unmapped)**. Per §11.1.3 + §11.3 the time is entered
+  once from the route-time table, NOT copied from how long the trip took.
+- Journey setup: destination input suggests places with a recorded route from the origin;
+  matching routes show **Use this route** (switches to Known Route with the recorded time; the
+  GM still confirms the Route). **Known Routes** list (everyone sees; GM can Edit, Delete =
+  route destroyed §11.1.5, and **+ Add Known Route** for the Hamlet's familiar roads §11.1.4).
+- **V-003:** `wilderness.routeNotes`, a GM text box shown on Unmapped Country. Information only
+  (M-002 / DD-002). Cleared on Arrival but carried into the Record Known Route notes.
 
 **0.1.24 (Oct 6): fix.** Found Resources "Apply Result" stayed greyed out after picking recipients: the template called `rationPicksFor(entry)`, which read `rationPicks` internally, so Svelte never re-ran it. Pass the store-like variable into template function calls (`rationPicksFor(entry, rationPicks)`) - Svelte 3 only tracks variables visible in the markup. Also: daily Food and Water Usage now roll one after the other; launching both at once made Dice+ show only one (the other silently fell back to a local roll). Don't fire Dice+ rolls in parallel. Also: in the Quarter Plan a player's own box is highlighted (thick border, pale amber, "You" tag); the GM view is unchanged.
 

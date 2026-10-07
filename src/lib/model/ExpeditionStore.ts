@@ -111,6 +111,12 @@ export type WildernessExpeditionState = {
   assignments: ExpeditionAssignment[];
   // Food/water found this trip that the GM hasn't applied to sheets yet (V-005).
   foundResources: FoundResourceEntry[];
+  // V-003: maps, rumors, guide estimates for this leg. Informational only:
+  // never affects Trailblaze, Arrival, or Known Route status (M-002).
+  routeNotes: string;
+  // Set by an Unmapped Arrival until the GM records or skips the Known
+  // Route (V-006, §11.1.3). Kept in room state so a reload doesn't lose it.
+  pendingKnownRoute: { from: string; to: string; notes: string } | null;
 };
 
 export type FoundResourceEntry = {
@@ -242,6 +248,8 @@ export const defaultExpeditionState = (): ExpeditionState => ({
     knownRouteCautiousCommitment: false,
     assignments: [],
     foundResources: [],
+    routeNotes: "",
+    pendingKnownRoute: null,
   },
   exploration: {
     turn: 1,
