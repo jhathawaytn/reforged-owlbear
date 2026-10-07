@@ -559,7 +559,7 @@ export type Scar = { id: string; roll: number; name: string; note: string };
 // empties HP to exactly 0 with no overflow into STR. Attribute loss listed
 // here is NOT Damage (§14.2's "Damage and Attribute Loss are not the same
 // thing"): it never triggers a Critical Save, a Mortal Wound, or another
-// Scar - only reaching STR 0 still resolves as Slain (§14.6).
+// Scar - STR reaching 0 this way is a Mortal Wound (Jason's ruling, Oct 6; the book says incapacitated).
 export const SCAR_TABLE: { roll: number; name: string; effect: string }[] = [
   { roll: 1, name: "Distress", effect: "Lose d6 WIL." },
   { roll: 2, name: "Disfigurement", effect: "Lose 1 WIL and gain a permanent visible mark appropriate to the blow." },
