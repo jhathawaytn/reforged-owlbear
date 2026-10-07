@@ -128,7 +128,7 @@ Current version: **0.1.24** (popover `build=034`).
 `Downloads\Share with Claude\playtest_1\`), newer than the `docs/PLAYTEST_1_v0.4.pdf` in this
 repo. Check v0.5 first when a rule matters.
 
-**0.1.24 (Oct 6): fix.** Found Resources "Apply Result" stayed greyed out after picking recipients: the template called `rationPicksFor(entry)`, which read `rationPicks` internally, so Svelte never re-ran it. Pass the store-like variable into template function calls (`rationPicksFor(entry, rationPicks)`) - Svelte 3 only tracks variables visible in the markup.
+**0.1.24 (Oct 6): fix.** Found Resources "Apply Result" stayed greyed out after picking recipients: the template called `rationPicksFor(entry)`, which read `rationPicks` internally, so Svelte never re-ran it. Pass the store-like variable into template function calls (`rationPicksFor(entry, rationPicks)`) - Svelte 3 only tracks variables visible in the markup. Also: daily Food and Water Usage now roll one after the other; launching both at once made Dice+ show only one (the other silently fell back to a local roll). Don't fire Dice+ rolls in parallel.
 
 **0.1.23 (Oct 6): Batch 5 = V-010 + V-005, resources from travel.** New pieces:
 - `services/StockOperations.ts` (review B1): the one way to change another player's stocks.

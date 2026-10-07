@@ -309,13 +309,9 @@ export async function resolvePendingConsumption(
     ordinaryWaterItem = pc.gear.find((gear) => activeUsageItem(gear, "Water"));
   }
 
-  // Ordinary Food and Water are independent stocks, so launch their visible
-  // Usage rolls together. Extra Water remains sequential because the active
-  // stock may step down or deplete between rolls.
-  const ordinaryRolls: Promise<UsageResolution>[] = [];
-  let foodRollIndex = -1;
-  let waterRollIndex = -1;
-
+  // Food, then Water: one visible roll at a time. Launching both together
+  // made Dice+ show only one of them (the other fell back to an unseen local
+  // roll after its timeout).
   if (request.ordinaryRequired) {
     if (donorRolls.Food && parseDonor(choice.rationSource)) {
       usage.push(donorRolls.Food);
@@ -324,8 +320,7 @@ export async function resolvePendingConsumption(
       handResolved.push("Food");
       foodSatisfied = true;
     } else if (activeUsageItem(rationItem, "Rations")) {
-      foodRollIndex = ordinaryRolls.length;
-      ordinaryRolls.push(rollUsage(rationItem, request.ordinaryThreshold, "Food", true));
+      usage.push(await rollUsage(rationItem, request.ordinaryThreshold, "Food", true));
       foodSatisfied = true;
     }
 
@@ -336,15 +331,10 @@ export async function resolvePendingConsumption(
       handResolved.push("Water");
       waterSatisfied = true;
     } else if (activeUsageItem(ordinaryWaterItem, "Water")) {
-      waterRollIndex = ordinaryRolls.length;
-      ordinaryRolls.push(rollUsage(ordinaryWaterItem, request.ordinaryThreshold, "Water", true));
+      usage.push(await rollUsage(ordinaryWaterItem, request.ordinaryThreshold, "Water", true));
       waterSatisfied = true;
     }
   }
-
-  const ordinaryResults = await Promise.all(ordinaryRolls);
-  if (foodRollIndex >= 0) usage.push(ordinaryResults[foodRollIndex]);
-  if (waterRollIndex >= 0) usage.push(ordinaryResults[waterRollIndex]);
 
   if (request.ordinaryRequired && foodSatisfied) pc = clearDeprivationCause(pc, "Food");
 
