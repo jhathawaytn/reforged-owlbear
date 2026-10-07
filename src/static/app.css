@@ -45,7 +45,7 @@ button,
 }
 
 /* V-011: a dead character's sheet is dimmed; the header and banner aren't. */
-.dead-sheet > :not(:first-child):not([role="alert"]) {
+.dead-sheet > :not(:first-child):not([role="alert"]):not(.gm-viewing-bar) {
   filter: grayscale(1);
   opacity: 0.6;
 }

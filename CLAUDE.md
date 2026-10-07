@@ -44,7 +44,7 @@ don't reintroduce a leading `/` in those paths.
 **Owlbear caches extension iframes hard.** The Sep 27-28 work added three layers to make
 players actually get a new build:
 - The manifest's `popover` points at `app.html?build=NNN`. Bump `NNN` on each user-visible
-  release (`036` at 0.1.26).
+  release (`037` at 0.1.27).
 - `public/loader.html` + `dist/app-assets.json` (the deploy workflow writes it after the build)
   let a stable loader page pick up the newest hashed assets without leaving the Owlbear iframe.
 - Versioned manifests (`public/manifest-v016.json`, `manifest-v017.json`, ...) give testers a
@@ -122,11 +122,23 @@ in response to a broadcast request from the GM (same trust model as the HP nudge
   state; dungeon camp, sleep quarter, camp preparation, meals and watches, with a
   Quiet Night / Rough Night / Camp Disaster result.
 
-Current version: **0.1.26** (popover `build=036`).
+Current version: **0.1.27** (popover `build=037`).
 
 **Rules source moved on:** Jason's current rules text is `PLAYTEST_1_V0.5.md` (in
 `Downloads\Share with Claude\playtest_1\`), newer than the `docs/PLAYTEST_1_v0.4.pdf` in this
 repo. Check v0.5 first when a rule matters.
+
+**0.1.27 (Oct 6): GM Players view fixes.** Jason couldn't view player sheets and the HP nudge seemed dead.
+- **Wrong slot:** the GM's view of a player used the GM's OWN save-slot number, so a player on
+  another slot showed as an empty sheet. Players now publish `activeSlot` in their player
+  metadata (`pluginId("activeSlot")`) and `initGM`'s `slotFor()` uses it (fallback slot 1).
+- `PlayersView.svelte` redesigned: one card per player (character name + player), **View sheet**
+  (closes the window), **Adjust HP** + reason + Send, and the reply shown under it.
+- `sendHPNudge` now waits for the player's reply (`gm-hp-nudge-result`): "Mara: HP 9 -> 6",
+  plus a note when Overburdened (the sheet shows HP 0, which made a working nudge look broken),
+  or "didn't answer" after 10 s.
+- `GmViewingBar.svelte`: green "Viewing <character> (<player>'s sheet) - read-only" bar with
+  **Back to my sheet**, at the top of every page while the GM views someone else.
 
 **0.1.26 (Oct 6): fix.** Take Damage ignored Overburdened: the HP box showed 0 but the damage step used the stored HP, so HP soaked damage it shouldn't. Now, while Overburdened, all damage after Armor goes straight to STR and the stored HP is left untouched (it shows again when no longer Overburdened, Appendix A).
 
