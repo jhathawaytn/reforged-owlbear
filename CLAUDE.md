@@ -44,7 +44,7 @@ don't reintroduce a leading `/` in those paths.
 **Owlbear caches extension iframes hard.** The Sep 27-28 work added three layers to make
 players actually get a new build:
 - The manifest's `popover` points at `app.html?build=NNN`. Bump `NNN` on each user-visible
-  release (`033` at 0.1.23).
+  release (`034` at 0.1.24).
 - `public/loader.html` + `dist/app-assets.json` (the deploy workflow writes it after the build)
   let a stable loader page pick up the newest hashed assets without leaving the Owlbear iframe.
 - Versioned manifests (`public/manifest-v016.json`, `manifest-v017.json`, ...) give testers a
@@ -122,11 +122,13 @@ in response to a broadcast request from the GM (same trust model as the HP nudge
   state; dungeon camp, sleep quarter, camp preparation, meals and watches, with a
   Quiet Night / Rough Night / Camp Disaster result.
 
-Current version: **0.1.23** (popover `build=033`).
+Current version: **0.1.24** (popover `build=034`).
 
 **Rules source moved on:** Jason's current rules text is `PLAYTEST_1_V0.5.md` (in
 `Downloads\Share with Claude\playtest_1\`), newer than the `docs/PLAYTEST_1_v0.4.pdf` in this
 repo. Check v0.5 first when a rule matters.
+
+**0.1.24 (Oct 6): fix.** Found Resources "Apply Result" stayed greyed out after picking recipients: the template called `rationPicksFor(entry)`, which read `rationPicks` internally, so Svelte never re-ran it. Pass the store-like variable into template function calls (`rationPicksFor(entry, rationPicks)`) - Svelte 3 only tracks variables visible in the markup. Also: daily Food and Water Usage now roll one after the other; launching both at once made Dice+ show only one (the other silently fell back to a local roll). Don't fire Dice+ rolls in parallel. Also: in the Quarter Plan a player's own box is highlighted (thick border, pale amber, "You" tag); the GM view is unchanged.
 
 **0.1.23 (Oct 6): Batch 5 = V-010 + V-005, resources from travel.** New pieces:
 - `services/StockOperations.ts` (review B1): the one way to change another player's stocks.
