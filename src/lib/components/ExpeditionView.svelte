@@ -2175,9 +2175,12 @@
     });
   }
 
-  function rationPicksFor(entry: FoundResourceEntry): string[] {
+  // `all` is passed in (not read from rationPicks here) so the template
+  // re-runs these calls when a pick changes - Svelte only tracks variables
+  // that appear in the markup itself.
+  function rationPicksFor(entry: FoundResourceEntry, all: Record<string, string[]> = rationPicks): string[] {
     const count = entry.resource.kind === "FreshRations" ? entry.resource.count : 0;
-    const picks = rationPicks[entry.id] ?? [];
+    const picks = all[entry.id] ?? [];
     return Array.from({ length: count }, (_, index) => picks[index] ?? "");
   }
 
@@ -3296,7 +3299,7 @@
                 </div>
                 {#if entry.resource.kind === "FreshRations"}
                   <div class="flex flex-wrap gap-1 mt-1">
-                    {#each rationPicksFor(entry) as pick, index}
+                    {#each rationPicksFor(entry, rationPicks) as pick, index}
                       <select
                         class="text-xs w-auto"
                         value={pick}
@@ -3312,7 +3315,7 @@
                   </div>
                   <button
                     class="bg-black text-white rounded-md px-2 py-0.5 text-[10px] mt-1 disabled:opacity-40"
-                    disabled={resourceBusy[entry.id] || rationPicksFor(entry).some((pick) => !pick)}
+                    disabled={resourceBusy[entry.id] || rationPicksFor(entry, rationPicks).some((pick) => !pick)}
                     on:click={() => applyFreshRations(entry)}
                   >
                     {resourceBusy[entry.id] ? "Applying…" : "Apply Result"}
