@@ -8,6 +8,7 @@
   import { newId } from "../utils";
   import { rollNotation, rollSingleDie } from "../services/DicePlus";
   import { notify } from "../services/Notifier";
+  import { markDead } from "../lifeState";
   import type { SaveRollResult } from "../utils";
 
   let showModal = false;
@@ -16,7 +17,7 @@
   // (§13.10), and HP-to-STR chain (§14.18 Quick Reference) step for step.
   // Gambits and Techniques still aren't wired up - for now the player enters
   // the resulting damage number by hand.
-  type Phase = "reaction" | "entry" | "parry" | "shieldSacrifice" | "deflect" | "holdFast" | "scar" | "strOverflow" | "criticalSave" | "resolved";
+  type Phase = "clinging" | "reaction" | "entry" | "parry" | "shieldSacrifice" | "deflect" | "holdFast" | "scar" | "strOverflow" | "criticalSave" | "resolved";
   let phase: Phase = "reaction";
 
   type Reaction = "Defend" | "Block" | "Dodge" | "Parry" | "FightBack" | "ShieldSacrifice";
@@ -75,7 +76,17 @@
 
   function open() {
     reset();
+    // §14.7: any damage while Clinging kills, before Armor - skip the chain.
+    if ($pc.conditions.includes("Clinging")) phase = "clinging";
     showModal = true;
+  }
+
+  function confirmClingingDeath() {
+    const who = $pc.name || "A character";
+    $pc = markDead($pc);
+    log("Damage while Clinging: dies immediately (before Armor, no Save).");
+    notify(`${who} took damage while Clinging and is dead.`);
+    phase = "resolved";
   }
 
   function isFunctional(item: GearItem): boolean {
@@ -322,25 +333,28 @@
     $pc.attributes.STR = newSTR;
     log(`STR: ${strBefore} -> ${newSTR}.`);
 
-    if (newSTR <= 0) {
-      log("STR 0 - SLAIN. Stop: no Mortal Wound, Critical Save, Injury, Stabilization, Clinging, or Morale check.");
-      phase = "resolved";
-      return;
-    }
-
+    // Rules v0.5 §14.6: STR Damage reaching 0 always qualifies as a Mortal
+    // Wound (it's at least half current STR) and can still be stabilized -
+    // there's no separate "STR 0 = slain" rule for Damage any more.
     if (mortalWoundQualifies) {
+      const who = $pc.name || "A character";
       if ($pc.doomActive) {
+        $pc = markDead($pc);
         log("Doom: a Mortal Wound this session cannot be stabilized. Dead.");
+        notify(`${who} is dead (Doom + Mortal Wound).`);
         phase = "resolved";
         return;
       }
       if ($pc.mortalWound) {
+        $pc = markDead($pc);
         log("Second Mortal Wound before stabilization - dies immediately.");
+        notify(`${who} is dead (second Mortal Wound).`);
         phase = "resolved";
         return;
       }
       $pc.mortalWound = true;
-      log("Mortal Wound: dies in one hour unless stabilized (Stabilization isn't modeled yet - resolve by hand).");
+      log("Mortal Wound: dies in one hour unless stabilized. The GM confirms stabilization from the banner.");
+      notify(`${who} is MORTALLY WOUNDED - dies in 1 hour unless stabilized!`);
       phase = "resolved";
       return;
     }
@@ -473,6 +487,21 @@
       Follows the Reaction Sequence (§13.7), Damage Sequence (§13.10), and HP-to-STR chain (§14.18) in order.
       Defensive Maneuvering and Hold Fast are offered automatically when eligible (Clash/Fray, via Combat).
     </div>
+
+    {#if phase === "clinging"}
+      <div class="border-2 border-purple-900 rounded-md p-2 bg-purple-50">
+        <div class="font-bold text-purple-900">Clinging: any damage kills</div>
+        <div class="text-xs mt-1">
+          While Clinging, damage from any source or amount kills immediately. It resolves before Armor; no Save (§14.7).
+        </div>
+        <div class="flex gap-2 mt-2">
+          <button class="bg-purple-900 text-white rounded-md px-2 py-1 text-xs" on:click={confirmClingingDeath}>
+            Confirm: damage taken (dies)
+          </button>
+          <button class="border rounded-md px-2 py-1 text-xs" on:click={() => (showModal = false)}>Cancel - no damage</button>
+        </div>
+      </div>
+    {/if}
 
     {#if phase === "reaction"}
       <div class="text-xs">Choose your Defensive Reaction (one per incoming Action):</div>

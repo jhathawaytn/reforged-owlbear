@@ -19,6 +19,10 @@
   // current value - normally via an applied Permanent Injury (§14.4), or
   // Growth outpacing a temporarily-reduced current score.
   $: unreducedMax = $pc.attributeMax[forStat];
+  // §14.5/§14.7: STR goes red while Mortally Wounded; a Clinging character
+  // is off the STR track, so it shows a dash instead of a number.
+  $: mortallyWounded = forStat === "STR" && $pc.mortalWound && !$pc.dead;
+  $: offTrack = forStat === "STR" && $pc.conditions.includes("Clinging");
   $: showMax = unreducedMax !== $pc.attributes[forStat];
 </script>
 
@@ -32,15 +36,20 @@
       {forStat}{showMax ? ` (max ${unreducedMax})` : ""}
     </h2>
     <div class="sheet-stat flex gap-1 items-center">
-      <input
-        type="number"
-        inputmode="numeric"
-        value={$pc.attributes[forStat]}
-        on:input={onInput}
-        min="1"
-        max="20"
-        class="w-1/2"
-      />
+      {#if offTrack}
+        <div class="w-1/2 text-center text-3xl font-bold text-purple-900" title="Clinging: off the STR track (§14.7)">—</div>
+      {:else}
+        <input
+          type="number"
+          inputmode="numeric"
+          value={$pc.attributes[forStat]}
+          on:input={onInput}
+          min="1"
+          max="20"
+          class="w-1/2"
+          class:mortal-wound-stat={mortallyWounded}
+        />
+      {/if}
       <RollButton
         label={forStat}
         target={$pc.attributes[forStat]}

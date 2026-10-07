@@ -21,6 +21,9 @@
   // Condition ends amounts to the same thing. Shown as 0, never mutated.
   $: overburdened = isOverburdened($pc);
   $: displayHp = overburdened ? 0 : $pc.hitPoints;
+  $: mortallyWounded = $pc.mortalWound && !$pc.dead;
+  // §14.7: Clinging can't Catch Your Breath or recover normally.
+  $: clinging = $pc.conditions.includes("Clinging");
 
   function incrMaxHp() {
     $pc.maxHitPoints += 1;
@@ -107,6 +110,7 @@
   inputmode="numeric"
   class="text-5xl text-center font-bold"
   class:text-red-700={overburdened}
+  class:mortal-wound-stat={mortallyWounded}
   min="0"
   disabled={overburdened}
   title={overburdened ? "Overburdened - HP is forced to 0 and can't be edited until filled slots no longer exceed STR" : ""}
@@ -124,7 +128,12 @@
 
 <div class="flex flex-col gap-1">
   <TakeDamageButton />
-  <button class="bg-black text-white rounded-md text-sm px-2" on:click={() => catchYourBreath()}>
+  <button
+    class="bg-black text-white rounded-md text-sm px-2 disabled:opacity-40"
+    disabled={clinging}
+    title={clinging ? "Clinging: can't Catch Your Breath (§14.7)." : ""}
+    on:click={() => catchYourBreath()}
+  >
     Catch Your Breath
   </button>
   <div class="flex gap-1">
@@ -138,7 +147,12 @@
         {#each restLostAttributes as a}<option value={a}>{a}</option>{/each}
       </select>
     {/if}
-    <button class="bg-black text-white rounded-md text-sm px-2" on:click={restOrSleep} title="Resolve Rest quality. Rest is separate from Catch Your Breath: it does not automatically restore HP or consume Water.">
+    <button
+      class="bg-black text-white rounded-md text-sm px-2 disabled:opacity-40"
+      disabled={clinging}
+      on:click={restOrSleep}
+      title={clinging ? "Clinging: can't recover normally (§14.7)." : "Resolve Rest quality. Rest is separate from Catch Your Breath: it does not automatically restore HP or consume Water."}
+    >
       Rest
     </button>
   </div>

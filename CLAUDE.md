@@ -44,7 +44,7 @@ don't reintroduce a leading `/` in those paths.
 **Owlbear caches extension iframes hard.** The Sep 27-28 work added three layers to make
 players actually get a new build:
 - The manifest's `popover` points at `app.html?build=NNN`. Bump `NNN` on each user-visible
-  release (`034` at 0.1.24).
+  release (`035` at 0.1.25).
 - `public/loader.html` + `dist/app-assets.json` (the deploy workflow writes it after the build)
   let a stable loader page pick up the newest hashed assets without leaving the Owlbear iframe.
 - Versioned manifests (`public/manifest-v016.json`, `manifest-v017.json`, ...) give testers a
@@ -122,11 +122,32 @@ in response to a broadcast request from the GM (same trust model as the HP nudge
   state; dungeon camp, sleep quarter, camp preparation, meals and watches, with a
   Quiet Night / Rough Night / Camp Disaster result.
 
-Current version: **0.1.24** (popover `build=034`).
+Current version: **0.1.25** (popover `build=035`).
 
 **Rules source moved on:** Jason's current rules text is `PLAYTEST_1_V0.5.md` (in
 `Downloads\Share with Claude\playtest_1\`), newer than the `docs/PLAYTEST_1_v0.4.pdf` in this
 repo. Check v0.5 first when a rule matters.
+
+**0.1.25 (Oct 6): Batch 7 = V-011, Mortal Wound → Stabilize → Clinging.** (Batch 6, Known
+Routes + route notes, was dropped: Jason keeps those on the Owlbear map.)
+- `lifeState.ts` (+ tests): `lifeStateOf` = alive / mortallyWounded / clinging / dead, and
+  `applyLifeAction`: stabilize (Mortal Wound → Clinging condition), potion (all HP, STR =
+  floor(attributeMax.STR / 2)), professional (STR 1), override (ends Clinging only), dead,
+  revive (GM undo). New `pc.dead` field (defaults false).
+- **Jason's choices:** stabilization is ONE GM-only **Stabilized** button. The helper rolls
+  however they like; a failure changes nothing, so it needs no button. All life-or-death
+  switches are GM-only. `services/LifeActions.ts` broadcasts the GM's click to the patient's
+  own client (same pattern as the HP nudge) and waits for an answer; the patient's sheet must
+  be open.
+- `LifeBanner.svelte` across the top of every page: red MORTALLY WOUNDED ("dies in 1 hour, game
+  time" - deliberately no real-time countdown), purple CLINGING, grey DEAD (rest of the sheet
+  greyed via `.dead-sheet`). Players see "Waiting for the GM…" instead of buttons. STR and HP
+  get `.mortal-wound-stat` (red) while Mortally Wounded; STR shows "—" while Clinging (off the
+  STR track). Catch Your Breath and Rest are disabled while Clinging.
+- Take Damage: rules v0.5 §14.6 fix: STR Damage reaching 0 is a Mortal Wound (stabilizable),
+  no longer "SLAIN". Doom + Mortal Wound and a second Mortal Wound now set `dead`. A Mortal
+  Wound and every death are announced to the whole room. Damage while Clinging opens a
+  "Confirm: dies" panel instead of the normal chain.
 
 **0.1.24 (Oct 6): fix.** Found Resources "Apply Result" stayed greyed out after picking recipients: the template called `rationPicksFor(entry)`, which read `rationPicks` internally, so Svelte never re-ran it. Pass the store-like variable into template function calls (`rationPicksFor(entry, rationPicks)`) - Svelte 3 only tracks variables visible in the markup. Also: daily Food and Water Usage now roll one after the other; launching both at once made Dice+ show only one (the other silently fell back to a local roll). Don't fire Dice+ rolls in parallel. Also: in the Quarter Plan a player's own box is highlighted (thick border, pale amber, "You" tag); the GM view is unchanged.
 
