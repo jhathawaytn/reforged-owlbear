@@ -81,6 +81,15 @@
     showModal = true;
   }
 
+  // STR 0 from any cause (§14.6, rules v0.6): the character is dead.
+  function slain(message: string) {
+    const who = $pc.name || "A character";
+    $pc = markDead($pc);
+    log(message);
+    notify(`${who} is SLAIN (STR 0).`);
+    phase = "resolved";
+  }
+
   function confirmClingingDeath() {
     const who = $pc.name || "A character";
     $pc = markDead($pc);
@@ -214,7 +223,7 @@
       log(
         `Parry lost: attacker's ${parryAttackerRoll} beats your ${parryDefenderRoll}. STR ${strBefore} -> ${newSTR} (ignores Armor/HP, no Critical Save/Mortal Wound/Scar).`,
       );
-      if (newSTR <= 0) log("STR 0 - SLAIN.");
+      if (newSTR <= 0) slain("STR 0 - SLAIN (§14.6).");
     } else if (parryAttackerRoll < parryDefenderRoll) {
       log(`Parry won: your ${parryDefenderRoll} beats the attacker's ${parryAttackerRoll}. No damage to you.`);
     } else {
@@ -350,9 +359,14 @@
     $pc.attributes.STR = newSTR;
     log(`STR: ${strBefore} -> ${newSTR}.`);
 
-    // Rules v0.5 §14.6: STR Damage reaching 0 always qualifies as a Mortal
-    // Wound (it's at least half current STR) and can still be stabilized -
-    // there's no separate "STR 0 = slain" rule for Damage any more.
+    // §14.6 (rules v0.6): STR 0 for any reason = Slain immediately. Stop -
+    // no Mortal Wound, Critical Save, Injury, Stabilization, Clinging, or
+    // Morale check. A Mortal Wound only ever applies at STR 1+.
+    if (newSTR <= 0) {
+      slain("STR 0 - SLAIN. Stop: no Mortal Wound, Critical Save, Injury, Stabilization, Clinging, or Morale check.");
+      return;
+    }
+
     if (mortalWoundQualifies) {
       const who = $pc.name || "A character";
       if ($pc.doomActive) {
@@ -413,7 +427,7 @@
     $pc.attributes[attr] = after;
     log(`${attr}: ${before} -> ${after} (Scar - not Damage, no Critical Save/Mortal Wound/further Scar).`);
     if (attr === "STR" && after <= 0) {
-      log("STR 0 - SLAIN.");
+      slain("STR 0 - SLAIN (§14.6: any cause, including a Scar).");
     }
   }
 
