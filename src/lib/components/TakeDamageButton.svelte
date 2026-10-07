@@ -81,6 +81,28 @@
     showModal = true;
   }
 
+  // One Mortal Wound outcome for every path that can cause one (§14.5):
+  // damage into STR, and (Jason's rulings) STR 0 from a lost Parry or from
+  // Attribute Loss such as a Scar. Doom or an existing Mortal Wound = death.
+  function sufferMortalWound(cause: string) {
+    const who = $pc.name || "A character";
+    const from = cause ? ` (${cause})` : "";
+    if ($pc.doomActive) {
+      $pc = markDead($pc);
+      log(`Doom: a Mortal Wound${from} this session cannot be stabilized. Dead.`);
+      notify(`${who} is dead (Doom + Mortal Wound).`);
+    } else if ($pc.mortalWound) {
+      $pc = markDead($pc);
+      log(`Second Mortal Wound${from} before stabilization - dies immediately.`);
+      notify(`${who} is dead (second Mortal Wound).`);
+    } else {
+      $pc.mortalWound = true;
+      log(`Mortal Wound${from}: dies in one hour unless stabilized. The GM confirms stabilization from the banner.`);
+      notify(`${who} is MORTALLY WOUNDED${from} - dies in 1 hour unless stabilized!`);
+    }
+    phase = "resolved";
+  }
+
   function confirmClingingDeath() {
     const who = $pc.name || "A character";
     $pc = markDead($pc);
@@ -212,14 +234,12 @@
       const newSTR = Math.max(0, strBefore - parryAttackerRoll);
       $pc.attributes.STR = newSTR;
       log(
-        `Parry lost: attacker's ${parryAttackerRoll} beats your ${parryDefenderRoll}. STR ${strBefore} -> ${newSTR} (ignores Armor/HP, no Critical Save/Mortal Wound/Scar).`,
+        `Parry lost: attacker's ${parryAttackerRoll} beats your ${parryDefenderRoll}. STR ${strBefore} -> ${newSTR} (ignores Armor/HP; no Critical Save or Scar).`,
       );
-      // Rules V0.5 gap: Parry damage can't cause a Mortal Wound (§13.7.5), and
-      // §14.6 has no "STR 0 = death" rule for Damage. Don't invent one.
-      if (newSTR <= 0) {
-        log("STR 0 from a Parry: the rules (V0.5) don't say what happens - Parry can't cause a Mortal Wound. GM decides.");
-        notify(`${$pc.name || "A character"} hit STR 0 from a lost Parry - GM decides the outcome.`);
-      }
+      // Parry "cannot cause Mortal Wounds" (§13.7.5), but the rules don't say
+      // what happens at STR 0. Jason's ruling (Oct 6): STR 0 from a lost Parry
+      // is a Mortal Wound. Above 0, Parry still never causes one.
+      if (newSTR <= 0) sufferMortalWound("STR 0 from a lost Parry");
     } else if (parryAttackerRoll < parryDefenderRoll) {
       log(`Parry won: your ${parryDefenderRoll} beats the attacker's ${parryAttackerRoll}. No damage to you.`);
     } else {
@@ -359,25 +379,7 @@
     // Wound (it's at least half current STR) and can still be stabilized -
     // there's no separate "STR 0 = slain" rule for Damage any more.
     if (mortalWoundQualifies) {
-      const who = $pc.name || "A character";
-      if ($pc.doomActive) {
-        $pc = markDead($pc);
-        log("Doom: a Mortal Wound this session cannot be stabilized. Dead.");
-        notify(`${who} is dead (Doom + Mortal Wound).`);
-        phase = "resolved";
-        return;
-      }
-      if ($pc.mortalWound) {
-        $pc = markDead($pc);
-        log("Second Mortal Wound before stabilization - dies immediately.");
-        notify(`${who} is dead (second Mortal Wound).`);
-        phase = "resolved";
-        return;
-      }
-      $pc.mortalWound = true;
-      log("Mortal Wound: dies in one hour unless stabilized. The GM confirms stabilization from the banner.");
-      notify(`${who} is MORTALLY WOUNDED - dies in 1 hour unless stabilized!`);
-      phase = "resolved";
+      sufferMortalWound("");
       return;
     }
 
@@ -403,8 +405,8 @@
 
   // ---- Scar (§14.2) - HP emptied to exactly 0 with no overflow. Attribute
   // loss here is NOT Damage: no Critical Save, no Mortal Wound, no further
-  // Scar - STR reaching 0 this way is Attribute Loss: incapacitated, not
-  // dead (§14.6, rules V0.5). ----
+  // Scar - STR reaching 0 this way is a Mortal Wound (Jason's ruling; the
+  // book says "incapacitated"). ----
   async function rollTheScar() {
     const roll = await rollSingleDie(DIE_SIDES[dieSize]);
     const entry = SCAR_TABLE[roll - 1];
@@ -418,10 +420,9 @@
     const after = Math.max(0, before - amount);
     $pc.attributes[attr] = after;
     log(`${attr}: ${before} -> ${after} (Scar - not Damage, no Critical Save/Mortal Wound/further Scar).`);
-    if (attr === "STR" && after <= 0) {
-      log("STR 0 from a Scar: incapacitated, not dead (§14.6). Stays incapacitated until STR is above 0.");
-      notify(`${$pc.name || "A character"} is incapacitated (STR 0 from a Scar).`);
-    }
+    // The book (§14.6) calls STR 0 from Attribute Loss "incapacitated, not
+    // dead"; Jason's ruling (Oct 6) is that it plays as a Mortal Wound.
+    if (attr === "STR" && after <= 0) sufferMortalWound("STR 0 from a Scar");
   }
 
   async function applyScar(roll: number, replacedDoom = false) {

@@ -130,12 +130,14 @@ repo. Check v0.5 first when a rule matters. **`PLAYTEST_1_V0.5.md` is THE rules 
 `PLAYTEST_1_ASSEMBLY_v0.6.md` (Sep 15) disagreed with it (e.g. STR 0 = Slain) and was moved to
 `playtest_1\old\`; never use it.
 
-**0.1.28 (Oct 6): STR 0 wording per rules V0.5 §14.6.** (A PR #23 that made STR 0 = Slain from
-the stray v0.6 file was closed.) Damage to STR 0 stays a stabilizable Mortal Wound (0.1.25).
-A **Scar** taking STR to 0 now says "incapacitated, not dead" (it said SLAIN). The STR-overflow
-button no longer says "Slain". A **lost Parry** taking STR to 0 is a V0.5 gap (Parry can't cause
-a Mortal Wound; §14.6 has no STR-0 death for Damage), so the sheet says "GM decides" and tells
-the room; flagged to Jason for the book.
+**0.1.28 (Oct 6): every STR 0 is a Mortal Wound.** Rules source: the two PDFs in
+`playtest_1\Current Backup\` (Playtest v0.5 + manuscript v4 round 4 final), whose §14.6 match:
+STR Damage to 0 = stabilizable Mortal Wound, never instant death. (PR #23, "STR 0 = Slain" from a
+stray draft, was closed.) **Jason's rulings (Oct 6), beyond the book:** STR 0 from a **lost Parry**
+(book: Parry "cannot cause Mortal Wounds", silent at 0) and STR 0 from **Attribute Loss / a Scar**
+(book: "incapacitated, not dead") are BOTH Mortal Wounds. All paths go through
+`sufferMortalWound(cause)` in TakeDamageButton: Doom or an existing Mortal Wound = dead, else red
+banner + room announcement. The STR-overflow button no longer says "Slain".
 
 **0.1.27 (Oct 6): GM Players view fixes.** Jason couldn't view player sheets and the HP nudge seemed dead.
 - **Wrong slot:** the GM's view of a player used the GM's OWN save-slot number, so a player on
