@@ -44,7 +44,7 @@ don't reintroduce a leading `/` in those paths.
 **Owlbear caches extension iframes hard.** The Sep 27-28 work added three layers to make
 players actually get a new build:
 - The manifest's `popover` points at `app.html?build=NNN`. Bump `NNN` on each user-visible
-  release (`032` at 0.1.22).
+  release (`033` at 0.1.23).
 - `public/loader.html` + `dist/app-assets.json` (the deploy workflow writes it after the build)
   let a stable loader page pick up the newest hashed assets without leaving the Owlbear iframe.
 - Versioned manifests (`public/manifest-v016.json`, `manifest-v017.json`, ...) give testers a
@@ -122,11 +122,33 @@ in response to a broadcast request from the GM (same trust model as the HP nudge
   state; dungeon camp, sleep quarter, camp preparation, meals and watches, with a
   Quiet Night / Rough Night / Camp Disaster result.
 
-Current version: **0.1.22** (popover `build=032`).
+Current version: **0.1.23** (popover `build=033`).
 
 **Rules source moved on:** Jason's current rules text is `PLAYTEST_1_V0.5.md` (in
 `Downloads\Share with Claude\playtest_1\`), newer than the `docs/PLAYTEST_1_v0.4.pdf` in this
 repo. Check v0.5 first when a rule matters.
+
+**0.1.23 (Oct 6): Batch 5 = V-010 + V-005, resources from travel.** New pieces:
+- `services/StockOperations.ts` (review B1): the one way to change another player's stocks.
+  The sender broadcasts a request; the owner's client applies it to its own sheet, one at a
+  time in arrival order, and answers. No answer in time = `null`, and every caller offers a
+  by-hand fallback. A GM client never applies these (its sheet view can be another player's).
+- `stockRules.ts` (+ tests): `sharableStocks`, `rollSpecificStock`, `addFreshRations`,
+  `refillWater`. Pure; the service just calls these.
+- Presence messages now carry each player's live Food/Water stocks (`stocks`), so the daily
+  prompt can list "Mara - Waterskin d4".
+- **V-010:** the daily Food & Water prompt offers other travelers' stocks. Picking one rolls
+  that exact item on the donor's sheet first (donor gets a toast); if the donor can't supply it
+  (offline, empty) nothing changes and the player re-picks. A Food donor already rolled is not
+  re-rolled if the Water pick then fails (`donorRolls` memo). Extra Water rolls from a donor
+  go one at a time. "Shared - GM resolves by hand" is the offline/NPC fallback; the GM gets a
+  toast to step the donor's die. The old silent `"shared"` source is gone.
+- **V-005:** Forage / Hunt / Fish results and Trailblaze Boons 21, 22, 34, 64 carry a
+  `resource`. The GM board stores them in `wilderness.foundResources` (room state, survives the
+  Quarter ending) and shows a **Found Resources** panel: pick a recipient for each Fresh Ration
+  (never pre-selected) → Apply Result; tick whose Water to refill → Refill Water (the source
+  stays open until Close source); Boon 64 → GM picks food or water. Over capacity warns, never
+  blocks. Rations that don't land stay listed for a retry.
 
 **0.1.22 (Oct 5): Batch 4 = V-002, buying gear.** `src/lib/coins.ts` (+ tests):
 - The Gear window has **Buy** and **Add free** (loot / GM grant) on every row. Buy opens a

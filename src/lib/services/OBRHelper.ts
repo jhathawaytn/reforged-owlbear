@@ -12,6 +12,9 @@ import { initExpeditionStore } from "../model/ExpeditionStore";
 import { initExpeditionRolls } from "./ExpeditionRolls";
 import { initExpeditionDaily } from "./ExpeditionDaily";
 import { initExplorationLight } from "./ExplorationLight";
+import { initStockOperations } from "./StockOperations";
+import { sharableStocks } from "../stockRules";
+import type { SharableStock } from "../stockRules";
 
 const PLUGIN_ID = "rodeo.owlbear.reforged-sheet";
 
@@ -34,6 +37,9 @@ export type ReforgedPresence = {
   wildernessCraftRank: number;
   detectionRank: number;
   quartermasterQualified: boolean;
+  // Food/Water stocks other travelers may draw on (V-010). Empty for the GM,
+  // whose sheet view can be someone else's character.
+  stocks: SharableStock[];
   lastSeen: number;
 };
 
@@ -71,6 +77,7 @@ export async function init() {
     initExpeditionRolls();
     initExpeditionDaily();
     initExplorationLight();
+    initStockOperations();
     await initExpeditionStore();
 
     if (get(isGM)) {
@@ -132,6 +139,7 @@ type PresenceMessage = {
   wildernessCraftRank?: number;
   detectionRank?: number;
   quartermasterQualified?: boolean;
+  stocks?: SharableStock[];
   timestamp: number;
 };
 
@@ -166,6 +174,7 @@ function upsertReforgedPresence(message: PresenceMessage) {
       wildernessCraftRank: message.wildernessCraftRank ?? 0,
       detectionRank: message.detectionRank ?? 0,
       quartermasterQualified: message.quartermasterQualified ?? false,
+      stocks: Array.isArray(message.stocks) ? message.stocks : [],
       lastSeen: Date.now(),
     });
     return next;
@@ -181,16 +190,18 @@ function initReforgedPresence() {
   const announce = async (type: "hello" | "announce") => {
     try {
       const pc = get(PlayerCharacterStore);
+      const role = await OBR.player.getRole();
       const message: PresenceMessage = {
         type,
         id: OBR.player.id,
         connectionId: await OBR.player.getConnectionId(),
         name: await OBR.player.getName(),
-        role: await OBR.player.getRole(),
+        role,
         characterName: pc.name ?? "",
         wildernessCraftRank: rankForTree(pc, "Wilderness Craft"),
         detectionRank: rankForTree(pc, "Detection"),
         quartermasterQualified: hasQuartermasterCapability(pc),
+        stocks: role === "GM" ? [] : sharableStocks(pc),
         timestamp: Date.now(),
       };
       upsertReforgedPresence(message);
