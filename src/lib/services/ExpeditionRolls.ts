@@ -60,12 +60,29 @@ export type ExpeditionRollResponse = {
   roll?: SaveRollResult;
   outcome?: string;
   boonBane?: TrailblazeBoonBane;
+  resource?: FoundResource;
   fatigueApplied?: boolean;
 };
+
+// Food/water a result produced, waiting for the GM to Apply it to sheets
+// (V-005). "FoodOrWater" is Boon 64: the GM picks whichever fits the terrain.
+export type FoundResource =
+  | { kind: "FreshRations"; count: number }
+  | { kind: "Water" }
+  | { kind: "FoodOrWater" };
 
 export type ExpeditionOutcome = {
   text: string;
   boonBane?: TrailblazeBoonBane;
+  resource?: FoundResource;
+};
+
+// Trailblaze Boons that hand the Company food or water.
+const RESOURCE_BOONS: Record<string, FoundResource> = {
+  "21": { kind: "Water" },
+  "22": { kind: "FreshRations", count: 1 },
+  "34": { kind: "Water" },
+  "64": { kind: "FoodOrWater" },
 };
 
 export const PendingExpeditionRollStore = writable<ExpeditionRollRequest | null>(null);
@@ -336,17 +353,18 @@ export async function resolveExpeditionOutcome(
     if (boonBane) {
       pieces.push(`${boonBane.type} ${boonBane.code} - ${boonBane.theme}: ${boonBane.effect}`);
     }
-    return { text: pieces.join(" "), boonBane };
+    const resource = boonBane?.type === "Boon" ? RESOURCE_BOONS[boonBane.code] : undefined;
+    return { text: pieces.join(" "), boonBane, resource };
   }
   if (kind === "Forage for Food") {
-    return { text: roll.success ? "Gain 1 x d6 Fresh Ration." : "Nothing found; Quarter spent." };
+    return roll.success
+      ? { text: "Gain 1 x d6 Fresh Ration.", resource: { kind: "FreshRations", count: 1 } }
+      : { text: "Nothing found; Quarter spent." };
   }
   if (kind === "Forage for Water") {
-    return {
-      text: roll.success
-        ? "Establish a usable local water source if the terrain and fiction support one."
-        : "No usable water found; Quarter spent.",
-    };
+    return roll.success
+      ? { text: "Establish a usable local water source if the terrain and fiction support one.", resource: { kind: "Water" } }
+      : { text: "No usable water found; Quarter spent." };
   }
   if (kind === "Hunt") {
     if (!roll.success) return { text: "No prey taken; Quarter spent." };
@@ -354,13 +372,17 @@ export async function resolveExpeditionOutcome(
     const stocks = prey <= 3 ? 1 : prey <= 5 ? 2 : 4;
     return {
       text: `Prey d6 = ${prey}: gain ${stocks} x d6 Fresh Ration${stocks === 1 ? "" : "s"}.${roll.natural === 1 ? " Also recover a hide or other usable material." : ""}`,
+      resource: { kind: "FreshRations", count: stocks },
     };
   }
   if (kind === "Fish") {
     if (!roll.success) return { text: "No useful catch; Quarter spent." };
     const catchRoll = await rollSingleDie(6, { rollTarget: "everyone", showResults: true });
     const stocks = catchRoll <= 3 ? 1 : catchRoll <= 5 ? 2 : 3;
-    return { text: `Catch d6 = ${catchRoll}: gain ${stocks} x d6 Fresh Ration${stocks === 1 ? "" : "s"}.` };
+    return {
+      text: `Catch d6 = ${catchRoll}: gain ${stocks} x d6 Fresh Ration${stocks === 1 ? "" : "s"}.`,
+      resource: { kind: "FreshRations", count: stocks },
+    };
   }
   return {
     text: roll.success
@@ -449,6 +471,7 @@ export async function resolvePendingExpeditionRoll(choice?: "INT" | "STR"): Prom
     roll,
     outcome: outcome.text,
     boonBane: outcome.boonBane,
+    resource: outcome.resource,
     fatigueApplied,
   };
 

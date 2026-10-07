@@ -10,6 +10,7 @@ import { DIE_SIDES, stepDownDie } from "../types";
 import type { RestQuality } from "../model/ExpeditionStore";
 import { rollSingleDie } from "./DicePlus";
 import { showPopover } from "./Notifier";
+import { sendStockOperation } from "./StockOperations";
 import { resolveRestForCurrentCharacter, type RestResolution } from "./RestRecovery";
 
 const REQUEST_KEY = "rodeo.owlbear.reforged-sheet/expedition-daily-request";
@@ -60,12 +61,15 @@ export type ExpeditionDailyResponse = {
   waterSatisfied?: boolean;
   extraWaterRollsResolved?: number;
   usage?: UsageResolution[];
+  // Shared from another traveler, but the GM steps the donor's die by hand
+  // (donor offline, or an NPC).
+  handResolved?: ("Food" | "Water")[];
   rest?: RestResolution;
 };
 
 export type ConsumptionChoice = {
-  rationSource: string; // gear id, "shared", or "none"
-  waterSource: string; // gear id, "shared", or "none"
+  rationSource: string; // own gear id, donorSource(...), "hand", or "none"
+  waterSource: string; // own gear id, donorSource(...), "hand", or "none"
 };
 
 export const PendingExpeditionDailyStore = writable<ExpeditionDailyRequest | null>(null);
@@ -196,11 +200,85 @@ export function applyDayCloseout(
   );
 }
 
+// A source chosen in the daily prompt: one of my own gear ids, "none",
+// "hand" (shared from someone else; the GM steps the donor's die by hand),
+// or "donor:<playerId>:<gearId>" (roll that traveler's exact stock - V-010).
+export function donorSource(playerId: string, gearId: string): string {
+  return `donor:${playerId}:${gearId}`;
+}
+
+function parseDonor(source: string): { playerId: string; gearId: string } | undefined {
+  if (!source.startsWith("donor:")) return undefined;
+  const [, playerId, gearId] = source.split(":");
+  return playerId && gearId ? { playerId, gearId } : undefined;
+}
+
+// Donor rolls already made for the pending request. If the Water donor
+// fails after the Food donor already rolled, the player re-picks Water and
+// the Food donor is not rolled a second time.
+let donorRolls: { requestId: string; Food?: UsageResolution; Water?: UsageResolution } = { requestId: "" };
+
+const NO_ANSWER = "no answer";
+
+async function rollDonor(
+  source: string,
+  category: "Food" | "Water",
+  threshold: number,
+  ordinary: boolean,
+  forName: string,
+): Promise<UsageResolution | string> {
+  const donor = parseDonor(source);
+  if (!donor) return "Unknown source.";
+  const response = await sendStockOperation(donor.playerId, {
+    kind: "roll",
+    gearId: donor.gearId,
+    category,
+    threshold,
+    forName,
+  });
+  if (!response) return NO_ANSWER;
+  if (!response.ok || !response.roll) return response.message;
+  return {
+    itemName: `${response.characterName}'s ${response.roll.itemName}`,
+    before: response.roll.before as Exclude<UsageDieState, "depleted">,
+    roll: response.roll.roll,
+    threshold,
+    after: response.roll.after,
+    suppliedUse: true,
+    category,
+    ordinary,
+  };
+}
+
 export async function resolvePendingConsumption(
   choice: ConsumptionChoice,
 ): Promise<ExpeditionDailyResponse | null> {
   const request = get(PendingExpeditionDailyStore);
   if (!request || request.kind !== "Consumption") return null;
+  if (donorRolls.requestId !== request.requestId) donorRolls = { requestId: request.requestId };
+
+  const myName = get(PlayerCharacterStore).name || (await OBR.player.getName());
+
+  // Another traveler's stock is rolled on THEIR sheet first. If they can't
+  // supply it, nothing on this sheet changes and the player picks again.
+  if (request.ordinaryRequired) {
+    const picks: ["Food" | "Water", string][] = [
+      ["Food", choice.rationSource],
+      ["Water", choice.waterSource],
+    ];
+    for (const [category, source] of picks) {
+      if (!parseDonor(source) || donorRolls[category]) continue;
+      const result = await rollDonor(source, category, request.ordinaryThreshold, true, myName);
+      if (typeof result === "string") {
+        throw new Error(
+          result === NO_ANSWER
+            ? `That traveler's sheet didn't answer, so their ${category} wasn't used. Pick another source, or "Shared - GM resolves by hand".`
+            : `${result} Pick another ${category} source.`,
+        );
+      }
+      donorRolls[category] = result;
+    }
+  }
 
   let pc = get(PlayerCharacterStore);
   pc = {
@@ -210,6 +288,9 @@ export async function resolvePendingConsumption(
     deprivationCauses: [...pc.deprivationCauses],
   };
   const usage: UsageResolution[] = [];
+  const handResolved: ("Food" | "Water")[] = [];
+
+  const ownGearId = (source: string) => source !== "none" && source !== "hand" && !parseDonor(source);
 
   let foodSatisfied = !request.ordinaryRequired;
   const totalWaterRolls = (request.ordinaryRequired ? 1 : 0) + Math.max(0, request.extraWaterRolls);
@@ -217,19 +298,14 @@ export async function resolvePendingConsumption(
   const extraWaterRollsResolved = request.extraWaterRolls;
 
   const rationItem =
-    request.ordinaryRequired && choice.rationSource !== "none" && choice.rationSource !== "shared"
+    request.ordinaryRequired && ownGearId(choice.rationSource)
       ? pc.gear.find((gear) => gear.id === choice.rationSource)
       : undefined;
   let ordinaryWaterItem =
-    request.ordinaryRequired && choice.waterSource !== "none" && choice.waterSource !== "shared"
+    request.ordinaryRequired && ownGearId(choice.waterSource)
       ? pc.gear.find((gear) => gear.id === choice.waterSource)
       : undefined;
-  if (
-    request.ordinaryRequired &&
-    choice.waterSource !== "none" &&
-    choice.waterSource !== "shared" &&
-    !activeUsageItem(ordinaryWaterItem, "Water")
-  ) {
+  if (request.ordinaryRequired && ownGearId(choice.waterSource) && !activeUsageItem(ordinaryWaterItem, "Water")) {
     ordinaryWaterItem = pc.gear.find((gear) => activeUsageItem(gear, "Water"));
   }
 
@@ -241,7 +317,11 @@ export async function resolvePendingConsumption(
   let waterRollIndex = -1;
 
   if (request.ordinaryRequired) {
-    if (choice.rationSource === "shared") {
+    if (donorRolls.Food && parseDonor(choice.rationSource)) {
+      usage.push(donorRolls.Food);
+      foodSatisfied = true;
+    } else if (choice.rationSource === "hand") {
+      handResolved.push("Food");
       foodSatisfied = true;
     } else if (activeUsageItem(rationItem, "Rations")) {
       foodRollIndex = ordinaryRolls.length;
@@ -249,15 +329,17 @@ export async function resolvePendingConsumption(
       foodSatisfied = true;
     }
 
-    if (choice.waterSource === "shared") {
+    if (donorRolls.Water && parseDonor(choice.waterSource)) {
+      usage.push(donorRolls.Water);
+      waterSatisfied = true;
+    } else if (choice.waterSource === "hand") {
+      handResolved.push("Water");
       waterSatisfied = true;
     } else if (activeUsageItem(ordinaryWaterItem, "Water")) {
       waterRollIndex = ordinaryRolls.length;
       ordinaryRolls.push(rollUsage(ordinaryWaterItem, request.ordinaryThreshold, "Water", true));
       waterSatisfied = true;
     }
-  } else if (choice.waterSource === "shared") {
-    waterSatisfied = true;
   }
 
   const ordinaryResults = await Promise.all(ordinaryRolls);
@@ -266,11 +348,34 @@ export async function resolvePendingConsumption(
 
   if (request.ordinaryRequired && foodSatisfied) pc = clearDeprivationCause(pc, "Food");
 
-  if (choice.waterSource !== "shared" && choice.waterSource !== "none") {
+  const extraRolls = Math.max(0, request.extraWaterRolls);
+  if (choice.waterSource === "hand") {
+    if (extraRolls > 0) {
+      if (!handResolved.includes("Water")) handResolved.push("Water");
+      waterSatisfied = true;
+    }
+  } else if (parseDonor(choice.waterSource)) {
+    // Extra Water from another traveler's stock: one roll at a time on their
+    // sheet. A die that empties still supplied that roll, but nothing after.
+    let allWaterSupplied = request.ordinaryRequired ? waterSatisfied : true;
+    for (let index = 0; index < extraRolls; index += 1) {
+      const result = await rollDonor(choice.waterSource, "Water", 3, false, myName);
+      if (typeof result === "string") {
+        allWaterSupplied = false;
+        break;
+      }
+      usage.push(result);
+      if (result.after === "depleted") {
+        if (index < extraRolls - 1) allWaterSupplied = false;
+        break;
+      }
+    }
+    waterSatisfied = allWaterSupplied;
+  } else if (choice.waterSource !== "none") {
     let preferredId = choice.waterSource;
     let allWaterSupplied = request.ordinaryRequired ? waterSatisfied : true;
 
-    for (let index = 0; index < Math.max(0, request.extraWaterRolls); index += 1) {
+    for (let index = 0; index < extraRolls; index += 1) {
       let item = pc.gear.find((gear) => gear.id === preferredId);
       if (!activeUsageItem(item, "Water")) {
         item = pc.gear.find((gear) => activeUsageItem(gear, "Water"));
@@ -285,7 +390,7 @@ export async function resolvePendingConsumption(
     }
 
     waterSatisfied = allWaterSupplied;
-  } else if (choice.waterSource === "none" && totalWaterRolls > 0) {
+  } else if (totalWaterRolls > 0) {
     waterSatisfied = false;
   }
 
@@ -296,6 +401,7 @@ export async function resolvePendingConsumption(
   }
 
   PlayerCharacterStore.set(pc);
+  donorRolls = { requestId: "" };
 
   const response: ExpeditionDailyResponse = {
     requestId: request.requestId,
@@ -308,6 +414,7 @@ export async function resolvePendingConsumption(
     waterSatisfied,
     extraWaterRollsResolved,
     usage,
+    handResolved,
   };
 
   LastExpeditionDailyStore.set(response);

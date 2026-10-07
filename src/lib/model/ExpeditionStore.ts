@@ -1,4 +1,5 @@
 import OBR from "@owlbear-rodeo/sdk";
+import type { FoundResource } from "../services/ExpeditionRolls";
 import { writable, get } from "svelte/store";
 import { legacyBaseBudget } from "../expeditionRules";
 
@@ -108,6 +109,16 @@ export type WildernessExpeditionState = {
   knownRouteDangerous: boolean;
   knownRouteCautiousCommitment: boolean;
   assignments: ExpeditionAssignment[];
+  // Food/water found this trip that the GM hasn't applied to sheets yet (V-005).
+  foundResources: FoundResourceEntry[];
+};
+
+export type FoundResourceEntry = {
+  id: string;
+  day: number;
+  quarter: TravelQuarter;
+  source: string; // "Hunt - Mara", "Trailblaze Boon 21 - Pip"
+  resource: FoundResource;
 };
 
 export type ExplorationActiveLight = {
@@ -230,6 +241,7 @@ export const defaultExpeditionState = (): ExpeditionState => ({
     knownRouteDangerous: false,
     knownRouteCautiousCommitment: false,
     assignments: [],
+    foundResources: [],
   },
   exploration: {
     turn: 1,

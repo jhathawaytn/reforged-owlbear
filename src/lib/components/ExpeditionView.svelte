@@ -59,12 +59,17 @@
     defaultActivityForQuarter,
   } from "../expeditionRules";
   import { lostAttributes } from "../services/RestRecovery";
+  import { sendStockOperation } from "../services/StockOperations";
+  import { showPopover } from "../services/Notifier";
+  import type { FoundResource } from "../services/ExpeditionRolls";
+  import type { FoundResourceEntry } from "../model/ExpeditionStore";
   import {
     PendingExpeditionDailyStore,
     LastExpeditionDailyStore,
     requestExpeditionDaily,
     resolvePendingConsumption,
     resolvePendingRest,
+    donorSource,
     applyDayCloseout,
     type ExpeditionDailyResponse,
   } from "../services/ExpeditionDaily";
@@ -178,6 +183,13 @@
   let dailyBusy = false;
   let rationChoice = "";
   let waterChoice = "";
+  let dailyError = "";
+  // Found Resources panel (V-005): the GM's recipient picks, per entry.
+  // Nothing is pre-selected - the GM always chooses who gets limited food.
+  let rationPicks: Record<string, string[]> = {};
+  let waterPicks: Record<string, Record<string, boolean>> = {};
+  let resourceBusy: Record<string, boolean> = {};
+  let resourceMessage = "";
   let restAttributeChoice: Attribute = "STR";
   let manualRestQuality: RestQuality = "Perilous";
   const pendingConsumptionIds = new Set<string>();
@@ -421,6 +433,21 @@
   $: localWaterItems = $localPc.gear.filter(
     (item) => item.usageKind === "Water" && item.usageDie && item.usageDie !== "depleted",
   );
+  // Other online travelers' food/water stocks (V-010), one entry per player
+  // even if they have several connections open.
+  $: donorStocks = [...new Map(
+    $ReforgedPresenceStore
+      .filter((client) => client.role === "PLAYER" && client.id !== $CurrentPlayerId)
+      .map((client) => [client.id, client] as const),
+  ).values()].flatMap((client) =>
+    (client.stocks ?? []).map((stock) => ({
+      ...stock,
+      value: donorSource(client.id, stock.gearId),
+      label: `${client.characterName || client.name} - ${stock.name} ${stock.die}`,
+    })),
+  );
+  $: donorFood = donorStocks.filter((stock) => stock.category === "Food");
+  $: donorWater = donorStocks.filter((stock) => stock.category === "Water");
   $: localLightSources = $localPc.gear.filter(
     (item) =>
       (item.name === "Torch Bundle" && item.usageDie && item.usageDie !== "depleted") ||
@@ -465,6 +492,7 @@
   $: if ($PendingExpeditionDailyStore && $PendingExpeditionDailyStore.requestId !== preparedDailyRequestId) {
     preparedDailyRequestId = $PendingExpeditionDailyStore.requestId;
     dailyBusy = false;
+    dailyError = "";
     if ($PendingExpeditionDailyStore.kind === "Consumption") {
       rationChoice = $PendingExpeditionDailyStore.ordinaryRequired
         ? localRationItems[0]?.id ?? "none"
@@ -1640,6 +1668,12 @@
             (playerId) => !ordinaryRequired || playerId !== id || !!response.waterSatisfied,
           );
 
+    if (response.handResolved?.length) {
+      showPopover(
+        `${response.characterName} shared ${response.handResolved.join(" and ")} from another traveler: step that donor's Usage Die by hand.`,
+      );
+    }
+
     const priorExtra = $expedition.wilderness.extraWaterRollsResolvedByPlayer[id] ?? 0;
     await patchWilderness({
       consumptionResolvedPlayerIds,
@@ -2117,8 +2151,115 @@
       roll,
       outcome: outcome.text,
       boonBane: outcome.boonBane,
+      resource: outcome.resource,
       fatigueApplied,
     };
+  }
+
+  async function recordFoundResource(source: string, resource: FoundResource) {
+    const entry: FoundResourceEntry = {
+      id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}_${Math.random()}`,
+      day: $expedition.wilderness.day,
+      quarter: $expedition.wilderness.quarter,
+      source,
+      resource,
+    };
+    await patchWilderness({ foundResources: [...($expedition.wilderness.foundResources ?? []), entry] });
+  }
+
+  async function replaceFoundResource(id: string, next: FoundResourceEntry | null) {
+    await patchWilderness({
+      foundResources: ($expedition.wilderness.foundResources ?? []).flatMap((entry) =>
+        entry.id !== id ? [entry] : next ? [next] : [],
+      ),
+    });
+  }
+
+  function rationPicksFor(entry: FoundResourceEntry): string[] {
+    const count = entry.resource.kind === "FreshRations" ? entry.resource.count : 0;
+    const picks = rationPicks[entry.id] ?? [];
+    return Array.from({ length: count }, (_, index) => picks[index] ?? "");
+  }
+
+  function setRationPick(entry: FoundResourceEntry, index: number, value: string) {
+    const picks = rationPicksFor(entry);
+    picks[index] = value;
+    rationPicks = { ...rationPicks, [entry.id]: picks };
+  }
+
+  function nameFor(playerId: string): string {
+    return memberForId(playerId)?.name ?? "That player";
+  }
+
+  async function applyFreshRations(entry: FoundResourceEntry) {
+    if (!$isGM || entry.resource.kind !== "FreshRations" || resourceBusy[entry.id]) return;
+    const picks = rationPicksFor(entry);
+    if (picks.some((pick) => !pick)) return;
+    resourceBusy = { ...resourceBusy, [entry.id]: true };
+    try {
+      const perPlayer = new Map<string, number>();
+      for (const pick of picks) if (pick !== "hand") perPlayer.set(pick, (perPlayer.get(pick) ?? 0) + 1);
+      const notes: string[] = [];
+      const unanswered: string[] = [];
+      let byHand = picks.filter((pick) => pick === "hand").length;
+      for (const [playerId, count] of perPlayer) {
+        const response = await sendStockOperation(playerId, { kind: "addFreshRations", count, source: entry.source }, 20000);
+        if (!response) {
+          for (let i = 0; i < count; i++) unanswered.push(playerId);
+          notes.push(`${nameFor(playerId)}'s sheet didn't answer.`);
+        } else if (!response.ok) {
+          for (let i = 0; i < count; i++) unanswered.push(playerId);
+          notes.push(`${response.characterName}: ${response.message}`);
+        } else {
+          notes.push(`${response.characterName}: ${response.message}`);
+        }
+      }
+      if (byHand) notes.push(`${byHand} Fresh Ration${byHand === 1 ? "" : "s"} to record by hand.`);
+      resourceMessage = notes.join(" ");
+      if (unanswered.length) {
+        // Keep what didn't land so the GM can retry or choose someone else.
+        rationPicks = { ...rationPicks, [entry.id]: unanswered };
+        await replaceFoundResource(entry.id, { ...entry, resource: { kind: "FreshRations", count: unanswered.length } });
+      } else {
+        await replaceFoundResource(entry.id, null);
+      }
+    } finally {
+      resourceBusy = { ...resourceBusy, [entry.id]: false };
+    }
+  }
+
+  async function applyWaterRefill(entry: FoundResourceEntry) {
+    if (!$isGM || resourceBusy[entry.id]) return;
+    const chosen = Object.entries(waterPicks[entry.id] ?? {}).filter(([, on]) => on).map(([playerId]) => playerId);
+    if (!chosen.length) return;
+    resourceBusy = { ...resourceBusy, [entry.id]: true };
+    try {
+      const notes: string[] = [];
+      const failed: Record<string, boolean> = {};
+      for (const playerId of chosen) {
+        const response = await sendStockOperation(playerId, { kind: "refillWater", source: entry.source }, 20000);
+        if (!response) {
+          failed[playerId] = true;
+          notes.push(`${nameFor(playerId)}'s sheet didn't answer.`);
+        } else {
+          notes.push(`${response.characterName}: ${response.message}`);
+          if (!response.ok) failed[playerId] = true;
+        }
+      }
+      resourceMessage = notes.join(" ");
+      // The source stays listed until the GM closes it, so latecomers can
+      // still refill; only the ones that didn't land stay ticked.
+      waterPicks = { ...waterPicks, [entry.id]: failed };
+    } finally {
+      resourceBusy = { ...resourceBusy, [entry.id]: false };
+    }
+  }
+
+  async function chooseFoodOrWater(entry: FoundResourceEntry, kind: "FreshRations" | "Water") {
+    await replaceFoundResource(entry.id, {
+      ...entry,
+      resource: kind === "Water" ? { kind: "Water" } : { kind: "FreshRations", count: 1 },
+    });
   }
 
   async function resolveTask(
@@ -2177,6 +2318,14 @@
     task.status = "done";
     task.response = response;
     setTaskState(task, watch);
+
+    if (response.resource) {
+      const source =
+        response.kind === "Trailblaze" && response.boonBane
+          ? `Trailblaze Boon ${response.boonBane.code} - ${response.characterName}`
+          : `${response.kind} - ${response.characterName}`;
+      await recordFoundResource(source, response.resource);
+    }
 
     if (watch) {
       watchMessage = response.outcome ?? "";
@@ -2369,11 +2518,14 @@
     const request = $PendingExpeditionDailyStore;
     if (dailyBusy || !request || request.kind !== "Consumption") return;
     dailyBusy = true;
+    dailyError = "";
     try {
       await resolvePendingConsumption({
         rationSource: rationChoice || "none",
         waterSource: waterChoice || "none",
       });
+    } catch (error) {
+      dailyError = error instanceof Error ? error.message : String(error);
     } finally {
       dailyBusy = false;
     }
@@ -3118,6 +3270,90 @@
           </details>
         </div>
 
+        {#if $isGM && ($expedition.wilderness.foundResources ?? []).length}
+          <div class="mt-3 border-2 border-black rounded-md p-2 bg-white">
+            <div class="font-bold text-xs">FOUND RESOURCES</div>
+            <div class="text-[10px] text-gray-500">
+              Choose who receives each find, then Apply. It's added on that player's own sheet. Use "By hand" for NPCs or anyone offline.
+            </div>
+            {#if resourceMessage}
+              <div class="text-[10px] mt-1 border rounded px-2 py-1 bg-gray-50">{resourceMessage}</div>
+            {/if}
+            {#each $expedition.wilderness.foundResources ?? [] as entry (entry.id)}
+              <div class="border rounded-md p-2 mt-1 text-xs">
+                <div class="flex items-center gap-2">
+                  <span class="font-bold">
+                    {entry.resource.kind === "FreshRations"
+                      ? `${entry.resource.count} x d6 Fresh Ration${entry.resource.count === 1 ? "" : "s"}`
+                      : entry.resource.kind === "Water"
+                        ? "Usable water source"
+                        : "Fresh Ration or water (GM's pick)"}
+                  </span>
+                  <span class="text-gray-500 text-[10px]">{entry.source} · Day {entry.day} {entry.quarter}</span>
+                  <button class="ml-auto border rounded-md px-2 text-[10px]" on:click={() => replaceFoundResource(entry.id, null)}>
+                    {entry.resource.kind === "Water" ? "Close source" : "Dismiss"}
+                  </button>
+                </div>
+                {#if entry.resource.kind === "FreshRations"}
+                  <div class="flex flex-wrap gap-1 mt-1">
+                    {#each rationPicksFor(entry) as pick, index}
+                      <select
+                        class="text-xs w-auto"
+                        value={pick}
+                        on:change={(event) => setRationPick(entry, index, event.currentTarget.value)}
+                      >
+                        <option value="">Ration {index + 1}: choose…</option>
+                        {#each playerMembers as member (member.id)}
+                          <option value={member.id}>{member.name}</option>
+                        {/each}
+                        <option value="hand">By hand (NPC / offline)</option>
+                      </select>
+                    {/each}
+                  </div>
+                  <button
+                    class="bg-black text-white rounded-md px-2 py-0.5 text-[10px] mt-1 disabled:opacity-40"
+                    disabled={resourceBusy[entry.id] || rationPicksFor(entry).some((pick) => !pick)}
+                    on:click={() => applyFreshRations(entry)}
+                  >
+                    {resourceBusy[entry.id] ? "Applying…" : "Apply Result"}
+                  </button>
+                {:else if entry.resource.kind === "Water"}
+                  <div class="flex flex-wrap gap-2 mt-1">
+                    {#each playerMembers as member (member.id)}
+                      <label class="flex items-center gap-1 text-[10px]">
+                        <input
+                          type="checkbox"
+                          class="w-auto"
+                          checked={!!waterPicks[entry.id]?.[member.id]}
+                          on:change={(event) =>
+                            (waterPicks = {
+                              ...waterPicks,
+                              [entry.id]: { ...(waterPicks[entry.id] ?? {}), [member.id]: event.currentTarget.checked },
+                            })}
+                        />
+                        {member.name}
+                      </label>
+                    {/each}
+                  </div>
+                  <button
+                    class="bg-black text-white rounded-md px-2 py-0.5 text-[10px] mt-1 disabled:opacity-40"
+                    disabled={resourceBusy[entry.id] || !Object.values(waterPicks[entry.id] ?? {}).some(Boolean)}
+                    on:click={() => applyWaterRefill(entry)}
+                  >
+                    {resourceBusy[entry.id] ? "Refilling…" : "Refill Water"}
+                  </button>
+                {:else}
+                  <div class="flex gap-1 mt-1">
+                    <button class="border rounded-md px-2 text-[10px]" on:click={() => chooseFoodOrWater(entry, "FreshRations")}>It's 1 Fresh Ration</button>
+                    <button class="border rounded-md px-2 text-[10px]" on:click={() => chooseFoodOrWater(entry, "Water")}>It's usable water</button>
+                  </div>
+                  <div class="text-[9px] text-gray-500 mt-0.5">Fuel or natural material instead? Record it by hand and Dismiss.</div>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
+
         {#if $isGM}
           <div class="mt-3 border rounded-md p-2 bg-gray-50">
             <details open={quarterPlanActive}>
@@ -3234,6 +3470,14 @@
                     {#each localRationItems as item (item.id)}
                       <option value={item.id}>{item.name} · {item.usageDie}</option>
                     {/each}
+                    {#if donorFood.length}
+                      <optgroup label="Use another traveler's">
+                        {#each donorFood as stock (stock.value)}
+                          <option value={stock.value}>{stock.label}</option>
+                        {/each}
+                      </optgroup>
+                    {/if}
+                    <option value="hand">Shared - GM resolves by hand</option>
                     <option value="none">No ration available</option>
                   </select>
                 </label>
@@ -3246,6 +3490,14 @@
                     {#each localWaterItems as item (item.id)}
                       <option value={item.id}>{item.name} · {item.usageDie}</option>
                     {/each}
+                    {#if donorWater.length}
+                      <optgroup label="Use another traveler's">
+                        {#each donorWater as stock (stock.value)}
+                          <option value={stock.value}>{stock.label}</option>
+                        {/each}
+                      </optgroup>
+                    {/if}
+                    <option value="hand">Shared - GM resolves by hand</option>
                     <option value="none">No accessible Water</option>
                   </select>
                 </label>
@@ -3253,7 +3505,11 @@
 
               <div class="text-[9px] text-gray-500 mt-1">
                 A die that depletes still supplied that use. Missing Water causes Deprived immediately; missing food is checked at dawn.
+                Another traveler's stock is rolled on their sheet. "By hand" is for an offline traveler or an NPC: the GM steps their die.
               </div>
+              {#if dailyError}
+                <div class="text-[10px] text-red-700 font-bold mt-1">{dailyError}</div>
+              {/if}
               <button
                 class="bg-black text-white rounded-md px-3 py-1 text-xs mt-2"
                 disabled={dailyBusy}
@@ -3301,6 +3557,11 @@
                 Food: {$LastExpeditionDailyStore.foodSatisfied ? "satisfied" : "not satisfied"}
                 · Water: {$LastExpeditionDailyStore.waterSatisfied ? "satisfied" : "not satisfied"}
               </div>
+              {#if $LastExpeditionDailyStore.handResolved?.length}
+                <div class="text-[9px] mt-0.5">
+                  {$LastExpeditionDailyStore.handResolved.join(" and ")} shared - the GM resolves the donor's die by hand.
+                </div>
+              {/if}
               {#if $LastExpeditionDailyStore.usage?.length}
                 <div class="flex flex-col gap-0.5 mt-1">
                   {#each $LastExpeditionDailyStore.usage as use}
